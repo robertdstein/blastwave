@@ -8,6 +8,7 @@ from typing import Callable, Mapping, Optional
 from urllib.parse import urljoin
 
 import requests
+from dotenv import load_dotenv
 from urllib3.util import Retry
 
 from blastwave.errors import BOOMCredentialsError
@@ -15,22 +16,27 @@ from blastwave.query.timeout import DEFAULT_TIMEOUT, TimeoutHTTPAdapter
 
 logger = logging.getLogger(__name__)
 
+BASE_URL = "https://api.kaboom.caltech.edu"
+
 
 class BoomClient:
     """
     Basic Boom client class for executing functions
+
+    :param base_url: Base URL to query (default: https://api.kaboom.caltech.edu)
     """
 
     def __init__(
         self,
-        base_url: str = "https://api.kaboom.caltech.edu/",
+        base_url: str = BASE_URL,
     ):
         self.base_url = base_url
         self._session: None | requests.Session = None
         self._session_headers: None | dict = None
-        self.catalogs = self.get_catalogs()
+        self._catalogs: None | list[str] = None
 
-    def set_up_session(self) -> requests.Session:
+    @staticmethod
+    def set_up_session() -> requests.Session:
         """
         Set up a session for sending requests to BOOM.
 
@@ -82,6 +88,7 @@ class BoomClient:
 
         :return: Boom token
         """
+        load_dotenv()
 
         user = os.getenv("BOOM_API_USER")
 
@@ -156,24 +163,6 @@ class BoomClient:
 
         return response
 
-    def ping(self) -> requests.Response:
-        """
-        Make a ping call
-
-        :return: Response from ping call
-        """
-        return self.api("get", "")
-
-    def get_catalogs(self) -> list[str]:
-        """
-        Get a list of catalogs available in BOOM
-
-        :return: List of catalogs
-        """
-        res = self.api("get", "catalogs")
-        res.raise_for_status()
-        return [x["name"] for x in res.json()["data"]]
-
     def get_fresh_token(self, username: str, password: str) -> str:
         """
         Get a fresh token from the Boom API.
@@ -194,3 +183,49 @@ class BoomClient:
             raise BOOMCredentialsError(f"Failed to get new token: {response.text}")
 
         return response.json()["access_token"]
+
+    def ping(self) -> requests.Response:
+        """
+        Make a ping call
+
+        :return: Response from ping call
+        """
+        return self.api("get", "")
+
+    def get_catalogs(self) -> list[str]:
+        """
+        Get a list of catalogs available in BOOM
+
+        :return: List of catalogs
+        """
+        if self._catalogs is None:
+            res = self.api("get", "catalogs")
+            res.raise_for_status()
+            self._catalogs = [x["name"] for x in res.json()["data"]]
+
+        assert self._catalogs is not None
+        return self._catalogs
+
+    def get_entry_count(self, catalog: str) -> int:
+        """
+        Get the number of entries in a catalog
+
+        :param catalog: Catalog name
+        :return: Number of entries in catalog
+        """
+        res = self.api(
+            "post", "queries/estimated_count", data={"catalog_name": catalog}
+        )
+        res.raise_for_status()
+        return res.json()["data"]
+
+    def get_sample_data(self, catalog: str) -> dict:
+        """
+        Get a sample data entry from a catalog
+
+        :param catalog: Catalog name
+        :return: Example json
+        """
+        res = self.api("get", f"/catalogs/{catalog}/sample")
+        res.raise_for_status()
+        return res.json()["data"]

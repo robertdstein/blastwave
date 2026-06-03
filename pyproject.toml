@@ -44,7 +44,8 @@ dev = [
     "pylint",
     "coveralls",
     "autotyping",
-    "mypy"
+    "mypy",
+    "jupyter"
 ]
 
 [project.urls]
@@ -56,12 +57,11 @@ packages = ["blastwave"]
 [tool.coverage.run]
 source = ["blastwave"]
 
-
 [tool.isort]
 profile = "black"
 
 [tool.pylint.format]
 max-line-length = "88"
 disable=["logging-fstring-interpolation"]
-good-names=["ax", "ra", "df", "pi", "i"]
+#good-names=["ax", "ra", "df", "pi", "i"]
 extension-pkg-whitelist=["extinction"]
