@@ -27,9 +27,9 @@ repos:
         types: [python]
 -   repo: local
     hooks:
-      - id: autotype
-        name: autotype
-        entry: autotype
+      - id: autotyping
+        name: autotyping
+        entry: autotyping
         language: system
 #        args: ["--aggressive"]
         types: [python]

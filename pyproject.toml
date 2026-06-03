@@ -43,7 +43,7 @@ dev = [
     "isort",
     "pylint",
     "coveralls",
-    "autotype",
+    "autotyping",
     "mypy"
 ]
 
