@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from urllib3.util import Retry
 
 from blastwave.errors import BOOMCredentialsError
+from blastwave.models.query import BOOMQuery, CatalogQuery, FilterQuery
 from blastwave.query.timeout import DEFAULT_TIMEOUT, TimeoutHTTPAdapter
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,11 @@ class BoomClient:
         self._session: None | requests.Session = None
         self._session_headers: None | dict = None
         self._catalogs: None | list[str] = None
+
+    @property
+    def catalog(self) -> str | None:
+        """Functions as a default catalog name for queries."""
+        return None
 
     @staticmethod
     def set_up_session() -> requests.Session:
@@ -163,6 +169,32 @@ class BoomClient:
 
         return response
 
+    def query(self, query: BOOMQuery | dict) -> list[dict]:
+        """
+        Make a find query call
+
+        :param query: Query to execute
+        :return: List of results
+        """
+        boom_query = BOOMQuery.model_validate(query)
+        res = self.api(
+            "post", "queries/find", data=boom_query.model_dump(exclude_none=True)
+        )
+        res.raise_for_status()
+        return res.json()["data"]
+
+    def count(self, query: CatalogQuery | FilterQuery | BOOMQuery | dict) -> int:
+        """
+        Make a count call
+
+        :param query: Query to count
+        :return: Number of records
+        """
+        boom_query = FilterQuery.model_validate(query)
+        res = self.api("post", "queries/count", data=boom_query.model_dump())
+        res.raise_for_status()
+        return res.json()["data"]
+
     def get_fresh_token(self, username: str, password: str) -> str:
         """
         Get a fresh token from the Boom API.
@@ -206,26 +238,52 @@ class BoomClient:
         assert self._catalogs is not None
         return self._catalogs
 
-    def get_entry_count(self, catalog: str) -> int:
+    def resolve_catalog(self, catalog: str | None = None) -> str:
+        """
+        Resolve a catalog name
+
+        :param catalog: Catalog name
+        :return: Catalog name to use in query
+        """
+        name = catalog or self.catalog
+        if name is None:
+            raise ValueError("No catalog specified")
+        return name
+
+    def get_entry_count(self, catalog: str | None = None) -> int:
         """
         Get the number of entries in a catalog
 
         :param catalog: Catalog name
         :return: Number of entries in catalog
         """
+        query = CatalogQuery(catalog_name=self.resolve_catalog(catalog))
         res = self.api(
-            "post", "queries/estimated_count", data={"catalog_name": catalog}
+            "post",
+            "queries/estimated_count",
+            data=query.model_dump(exclude_none=True),
         )
         res.raise_for_status()
         return res.json()["data"]
 
-    def get_sample_data(self, catalog: str) -> dict:
+    def get_catalog_indexes(self, catalog: str | None = None) -> int:
+        """
+        Get the indexes columns for a catalog
+
+        :param catalog: Catalog name
+        :return: Example json
+        """
+        res = self.api("get", f"/catalogs/{self.resolve_catalog(catalog)}/indexes")
+        res.raise_for_status()
+        return res.json()["data"]
+
+    def get_sample_data(self, catalog: str | None = None) -> dict:
         """
         Get a sample data entry from a catalog
 
         :param catalog: Catalog name
         :return: Example json
         """
-        res = self.api("get", f"/catalogs/{catalog}/sample")
+        res = self.api("get", f"/catalogs/{self.resolve_catalog(catalog)}/sample")
         res.raise_for_status()
-        return res.json()["data"]
+        return res.json()["data"][0]
