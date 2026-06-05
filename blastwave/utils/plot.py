@@ -38,4 +38,5 @@ def plot_lightcurve(photometry_df) -> plt.Figure:
     plt.gca().invert_yaxis()
     plt.xlabel("Time [MJD]")
     plt.ylabel("Mag [AB]")
+    plt.close(fig)
     return fig

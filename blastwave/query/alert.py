@@ -11,8 +11,15 @@ from babamul.models import LsstAlert, ZtfAlert
 
 from blastwave.models import BOOMQuery, Source
 from blastwave.query.boom import BoomClient
+from blastwave.utils.photometry import (
+    deduplicate_lsst_photometry,
+    deduplicate_ztf_photometry,
+)
 
-model_map = {"ZTF_alerts": ZtfAlert, "LSST_alerts": LsstAlert}
+parse_map = {
+    "ZTF_alerts": deduplicate_ztf_photometry,
+    "LSST_alerts": deduplicate_lsst_photometry,
+}
 
 GenerateFunc = Callable[[dict, pd.DataFrame], Source]
 generator_mapping: dict[str, GenerateFunc] = {
@@ -128,16 +135,16 @@ class AlertClient(BoomClient, ABC):
         """
         Get photometry for a given survey.
 
-        :param survey: Survey name
+        :param catalog: Catalog name
         :param aliases: Dictionary of aliases
         :return: DataFrame of photometry for the survey
         """
-        model = model_map[catalog]
+        parse_f = parse_map[catalog]
         survey = catalog.split("_")[0]
         try:
             match_name = aliases[survey][0]
             match = self.get_full_data(match_name, catalog=catalog)
-            photometry = [x.model_dump() for x in model(**match).get_photometry()]
+            photometry = parse_f(match)
             new_df = pd.DataFrame(photometry)
             new_df["survey"] = survey
         except (KeyError, IndexError):
@@ -152,7 +159,7 @@ class AlertClient(BoomClient, ABC):
         :return: DataFrame of photometry for all cross-matched surveys
         """
         all_match_photometry = []
-        for survey in model_map:
+        for survey in parse_map:
             all_match_photometry.append(self.get_match_photometry(survey, aliases))
         return pd.concat(all_match_photometry, ignore_index=True)
 
@@ -167,11 +174,10 @@ class AlertClient(BoomClient, ABC):
         :return: DataFrame of photometry for all cross-matched surveys
         """
         catalog = self.resolve_catalog(catalog)
-        model = model_map[catalog]
-        photometry_df = pd.DataFrame(
-            [x.model_dump() for x in model(**full_alert).get_photometry()]
-        )
+        parse_f = parse_map[catalog]
+        photometry_df = parse_f(full_alert)
         photometry_df["survey"] = catalog.split("_")[0]
+
         match_photometry = self.get_all_match_photometry(full_alert["aliases"])
 
         if len(match_photometry) > 0:
@@ -180,14 +186,7 @@ class AlertClient(BoomClient, ABC):
             )
 
         photometry_df = (
-            photometry_df.sort_values(by="jd")
-            .reset_index(drop=True)
-            .rename(
-                columns={
-                    "psfFlux": "psf_flux",
-                    "psfFluxErr": "psf_flux_err",
-                }
-            )
+            photometry_df.sort_values(by="jd").reset_index(drop=True)
         ).replace({None: np.nan})
         return photometry_df
 

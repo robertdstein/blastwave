@@ -2,7 +2,9 @@
 Model for a Source
 """
 
+import json
 import logging
+from pathlib import Path
 
 import pandas as pd
 from babamul.models import LsstAlert, ZtfAlert
@@ -11,6 +13,7 @@ from pydantic import BaseModel, computed_field
 
 from blastwave.models.observation import Observation
 from blastwave.utils import plot_lightcurve
+from blastwave.utils.cache import get_photometry_path, get_source_path
 
 logger = logging.getLogger(__name__)
 
@@ -111,43 +114,9 @@ class Source(BaseModel):
             df["isdiffpos"].astype(bool)
             & (pd.notnull(df["magpsf"]))
             & (df["snr"] > min_snr)
+            & ~(df["magpsf"] > (df["diffmaglim"] + 1.0))
         )
         return df[positive_det_mask].reset_index(drop=True)
-
-    # @classmethod
-    # def from_lsst(cls, lsst_id: int | str) -> "Source":
-    #     """
-    #     Create Source object from raw LSST alert
-    #
-    #     :param lsst_id: LSST object ID
-    #     :return: Source object
-    #     """
-    #
-    #     alert = get_object(
-    #         "LSST",
-    #         object_id=str(lsst_id),
-    #     )
-    #
-    #     photometry = [x.model_dump() for x in alert.get_photometry()]
-    #
-    #     lsst_df = pd.DataFrame(photometry)
-    #     lsst_df["survey"] = "lsst"
-    #
-    #     extra_df = get_extra_df(alert)
-    #
-    #     photometry = convert_photometry(lsst_df, extra_df)
-    #
-    #     return cls(
-    #         objectid=alert.objectId,
-    #         lsstid=alert.objectId,
-    #         ztfid=(
-    #             alert.survey_matches.ztf.objectId
-    #             if alert.survey_matches.ztf is not None
-    #             else None
-    #         ),
-    #         photometry=photometry,
-    #         **alert.candidate.model_dump(),
-    #     )
 
     @classmethod
     def from_lsst(cls, full_data: dict, photometry_df: pd.DataFrame) -> "Source":
@@ -224,23 +193,110 @@ class Source(BaseModel):
         df = self.get_detections(min_snr=min_snr)
         return plot_lightcurve(df)
 
-    # @classmethod
-    # def from_alert(cls, raw_alert, category: str) -> "Source":
-    #     """
-    #     Create Source object from raw alert based on category
-    #
-    #     :param raw_alert: Raw alert data
-    #     :param category: Category of alert ("lsst" or "ztf")
-    #     :return: Source object
-    #     """
-    #     if category == "lsst":
-    #         return cls.from_lsst(raw_alert)
-    #     elif category == "ztf":
-    #         return cls.from_ztf(raw_alert)
-    #     else:
-    #         err = f"Unrecognised category {category}"
-    #         logger.error(err)
-    #         raise ValueError(err)
+    def get_trimmed_photometry(self, min_snr: float = 3.0) -> list[Observation]:
+        """
+        Trim photometry from source
+
+        :param min_snr: Minimum SNR of positive detections
+        :return: list of trimmed Observations
+        """
+        photometry_df = self.get_detections(min_snr=min_snr)
+        return [Observation(**row) for row in photometry_df.to_dict(orient="records")]
+
+    def to_json(self, trim_photometry: bool = True) -> str:
+        """
+        Convert to JSON
+
+        :return: JSON representation of Source
+        """
+        data = self.model_dump(
+            mode="json", exclude_defaults=True, exclude_computed_fields=True
+        )
+        df = (
+            self.get_detections(min_snr=3.0)
+            if trim_photometry
+            else self.get_photometry()
+        )
+        df = df[list(Observation.model_fields.keys())]
+        data["photometry"] = df.to_dict(orient="list")
+        return json.dumps(data)
+
+    @classmethod
+    def from_json(cls, data: str) -> "Source":
+        """
+        Create Source object from JSON
+
+        :param data: JSON representation of Source
+        :return: Source object
+        """
+        d = json.loads(data)
+        photometry_df = pd.DataFrame(d.pop("photometry"))
+        photometry = [
+            Observation(**row) for row in photometry_df.to_dict(orient="records")
+        ]
+        return cls(**d, photometry=photometry)
+
+    def to_parquet(
+        self, base_path: Path | str | None = None, trim_photometry: bool = True
+    ) -> None:
+        """
+        Export photometry as parquet file
+
+        :param base_path: Base directory
+        :param trim_photometry: Store only positive detections
+        :return: None
+        """
+        source_path = get_source_path(self.objectid, base_path)
+        photometry_path = get_photometry_path(self.objectid, base_path)
+
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        photometry_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # source metadata row
+        meta = {
+            k: v
+            for k, v in self.model_dump(
+                exclude_defaults=True, exclude_computed_fields=True
+            ).items()
+            if k != "photometry"
+        }
+
+        pd.DataFrame([meta]).to_parquet(source_path, compression="zstd")
+
+        # photometry
+        df = (
+            self.get_detections(min_snr=3.0)
+            if trim_photometry
+            else self.get_photometry()
+        )
+
+        # Clip derived columns
+        df = df[list(Observation.model_fields.keys())]
+
+        df.to_parquet(photometry_path, compression="zstd")
+
+    @classmethod
+    def from_parquet(
+        cls, object_id: str, base_path: Path | str | None = None
+    ) -> "Source":
+        """
+        Load a Source object from parquet files.
+
+        :param object_id: Object ID
+        :param base_path: Base path to parquet files
+        :return: Source object
+        """
+        meta = pd.read_parquet(get_source_path(object_id, base_path))
+        photometry_df = pd.read_parquet(get_photometry_path(object_id, base_path))
+
+        photometry = [
+            Observation(**row) for row in photometry_df.to_dict(orient="records")
+        ]
+
+        return cls(
+            **meta.iloc[0].to_dict(),
+            photometry=photometry,
+        )
 
     # def to_archive(self):
     #     """

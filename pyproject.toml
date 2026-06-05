@@ -35,7 +35,9 @@ dependencies = [
     "dotenv",
     "babamul",
     "polars",
-    "matplotlib"
+    "matplotlib",
+    "pandas",
+    "pyarrow"
 ]
 [project.optional-dependencies]
 dev = [
@@ -47,7 +49,7 @@ dev = [
     "autotyping",
     "mypy",
     "jupyter",
-    "astropy"
+    "astropy",
 ]
 
 [project.urls]
