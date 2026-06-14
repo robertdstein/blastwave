@@ -30,6 +30,8 @@ def deduplicate_ztf_photometry(full_data: dict) -> pd.DataFrame:
         if mask.any():
             df = pd.concat([df, ul_df[mask]], ignore_index=True)
 
+    df = df[[x for x in df.columns if x not in ["snr"]]]
+
     df = (
         df.sort_values(by="jd")
         .reset_index(drop=True)
@@ -43,6 +45,7 @@ def deduplicate_ztf_photometry(full_data: dict) -> pd.DataFrame:
         )
     )
     df["isdiffpos"] = df["psf_flux"] > 0.0
+
     return df
 
 

@@ -23,6 +23,29 @@ def get_data_dir(data_dir: Path | str | None = None) -> Path:
     return Path(_data_dir)
 
 
+def get_crossmatch_dir(data_dir: Path | str | None = None) -> Path:
+    """
+    Get path to crossmatch directory
+
+    :param data_dir: Path to data directory
+    :return: Path to crossmatch directory
+    """
+    return get_data_dir(data_dir) / "crossmatches"
+
+
+def get_crossmatch_path(
+    object_id: str | int, data_dir: Path | str | None = None
+) -> Path:
+    """
+    Get path to crossmatch file
+
+    :param object_id: Object ID
+    :param data_dir: Data directory
+    :return: Path to crossmatch file
+    """
+    return get_crossmatch_dir(data_dir) / f"{object_id}.json"
+
+
 def get_source_dir(data_dir: Path | str | None = None) -> Path:
     """
     Get path to source directory

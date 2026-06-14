@@ -7,6 +7,7 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
+from astropy.coordinates import SkyCoord
 from babamul.models import LsstAlert, ZtfAlert
 
 from blastwave.models import BOOMQuery, Source
@@ -129,6 +130,41 @@ class AlertClient(BoomClient, ABC):
             object_id, catalog=catalog, projection=aux_projection
         )
         aux_data.update(latest)
+        aux_data = self.update_crossmatches(aux_data)
+        return aux_data
+
+    def update_crossmatches(self, aux_data: dict) -> dict:
+        """
+        Update the cross-matches in the aux data to include the latest alert data.
+
+        :param aux_data: Dictionary of aux data
+        :return: Updated aux data with cross-matches
+        """
+
+        src_position = SkyCoord(
+            aux_data["candidate"]["ra"], aux_data["candidate"]["dec"], unit="deg"
+        )
+
+        for cat in ["LSPSC", "NED"]:
+            matches = self.cone_search(
+                src_position.ra.deg, src_position.dec.deg, catalog=cat, limit=1
+            )
+
+            # Should be zero or 1 for now
+            for match in matches:
+                pos = match.pop("coordinates")["radec_geojson"]
+                sep = float(
+                    src_position.separation(
+                        SkyCoord(
+                            pos["coordinates"][0] + 180.0,
+                            pos["coordinates"][1],
+                            unit="deg",
+                        )
+                    ).arcsec
+                )
+                match["distance_arcsec"] = sep
+
+            aux_data["cross_matches"][cat] = matches
         return aux_data
 
     def get_match_photometry(self, catalog: str, aliases: dict) -> pd.DataFrame:
@@ -177,7 +213,6 @@ class AlertClient(BoomClient, ABC):
         parse_f = parse_map[catalog]
         photometry_df = parse_f(full_alert)
         photometry_df["survey"] = catalog.split("_")[0]
-
         match_photometry = self.get_all_match_photometry(full_alert["aliases"])
 
         if len(match_photometry) > 0:
@@ -190,15 +225,28 @@ class AlertClient(BoomClient, ABC):
         ).replace({None: np.nan})
         return photometry_df
 
-    def get_source(self, object_id: str | int, catalog: str | None = None) -> Source:
+    def get_source(
+        self,
+        object_id: str | int,
+        catalog: str | None = None,
+        alert_projection: dict | None = None,
+        aux_projection: dict | None = None,
+    ) -> Source:
         """
         Get the full source data for a given object ID.
 
         :param object_id: Object ID
         :param catalog: Catalog name
+        :param alert_projection: Projection for fields to return for alert
+        :param aux_projection: Projection for fields to return for aux data
         :return: Dictionary of source data
         """
         catalog = self.resolve_catalog(catalog)
-        full_data = self.get_full_data(object_id, catalog=catalog)
+        full_data = self.get_full_data(
+            object_id,
+            catalog=catalog,
+            alert_projection=alert_projection,
+            aux_projection=aux_projection,
+        )
         photometry_df = self.get_all_photometry(full_data, catalog=catalog)
         return generator_mapping[catalog](full_data, photometry_df)

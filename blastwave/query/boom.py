@@ -7,6 +7,7 @@ import os
 from typing import Callable, Mapping, Optional
 from urllib.parse import urljoin
 
+import numpy as np
 import requests
 from dotenv import load_dotenv
 from urllib3.util import Retry
@@ -287,3 +288,52 @@ class BoomClient:
         res = self.api("get", f"/catalogs/{self.resolve_catalog(catalog)}/sample")
         res.raise_for_status()
         return res.json()["data"][0]
+
+    @staticmethod
+    def get_near_sphere_dist(radius_arcsec: float) -> float:
+        """
+        Convert a radius in arcseconds to a radius
+        in meters (on Earth surface) for use in a $nearSphere query
+
+        :param radius_arcsec: Radius in arcseconds
+        :return: Radius in meters
+        """
+        return ((radius_arcsec / 3600.0) * np.pi / 180.0) * 6371008.8
+
+    def cone_search(
+        self,
+        ra: float,
+        dec: float,
+        radius_arcsec: float = 1.0,
+        catalog: str | None = None,
+        limit: int | None = 1,
+    ) -> list[dict]:
+        """
+        Function to do a cone search
+
+        :param ra: Ra (decimal degrees)
+        :param dec: Declination (decimal degrees)
+        :param radius_arcsec: Search radius (arcsec)
+        :param catalog: Catalog name
+        :param limit: Number of results to return
+        :return: List of search results (possibly of length 0 if there are no results)
+        """
+
+        res = self.query(
+            BOOMQuery(
+                catalog_name=self.resolve_catalog(catalog),
+                filter={
+                    "coordinates.radec_geojson": {
+                        "$nearSphere": {
+                            "$geometry": {
+                                "type": "Point",
+                                "coordinates": [ra - 180.0, dec],
+                            },
+                            "$maxDistance": self.get_near_sphere_dist(radius_arcsec),
+                        }
+                    }
+                },
+                limit=limit,
+            )
+        )
+        return res

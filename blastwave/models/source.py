@@ -7,13 +7,17 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-from babamul.models import LsstAlert, ZtfAlert
+from babamul.models import LsstAlert
 from matplotlib import pyplot as plt
 from pydantic import BaseModel, computed_field
 
 from blastwave.models.observation import Observation
-from blastwave.utils import plot_lightcurve
-from blastwave.utils.cache import get_photometry_path, get_source_path
+from blastwave.utils import (
+    get_crossmatch_path,
+    get_photometry_path,
+    get_source_path,
+    plot_lightcurve,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +29,18 @@ class Source(BaseModel):
 
     objectid: int | str
     jd: float
-    ztfid: str | None
-    lsstid: str | None
+    ztfid: str | None = None
+    lsstid: str | None = None
+    tns_name: str | None = None
     ra: float
     dec: float
     offset: float | None
     host_origin: str | None
-
+    redshift: float | None = None
+    redshift_error: float | None = None
+    redshift_origin: str | None = None
     photometry: list[Observation]
+    crossmatches: dict[str, list[dict]] | None = None
 
     @computed_field
     @property
@@ -72,7 +80,7 @@ class Source(BaseModel):
 
         :return: JD of first positive detection
         """
-        return self.get_detections()["jd"].min()
+        return float(self.get_detections()["jd"].min())
 
     @computed_field
     @property
@@ -82,7 +90,7 @@ class Source(BaseModel):
 
         :return: JD of last positive detection
         """
-        return self.get_detections()["jd"].max()
+        return float(self.get_detections()["jd"].max())
 
     @computed_field
     @property
@@ -142,6 +150,22 @@ class Source(BaseModel):
         # Add in something
         offset = None
         offset_origin = None
+        redshift = None
+        redshift_error = None
+        redshift_origin = None
+
+        crossmatches = full_data["cross_matches"]
+        for key in ["NED", "LSPSC", "PS1_DR1"]:
+            if key in crossmatches:
+                if len(crossmatches[key]) > 0:
+                    match = crossmatches[key][0]
+                    offset = match["distance_arcsec"]
+                    offset_origin = key
+                    if "z" in match:
+                        redshift = match["z"]
+                        redshift_error = match["z_unc"]
+                        redshift_origin = f"{key}_{match["z_tech"]}"
+                    break
 
         return cls(
             objectid=alert.objectId,
@@ -150,6 +174,10 @@ class Source(BaseModel):
             photometry=photometry,
             offset=offset,
             host_origin=offset_origin,
+            crossmatches=crossmatches,
+            redshift=redshift,
+            redshift_error=redshift_error,
+            redshift_origin=redshift_origin,
             **alert.candidate.model_dump(),
         )
 
@@ -162,7 +190,7 @@ class Source(BaseModel):
         :param photometry_df: Photometry data
         :return: Source object
         """
-        alert = ZtfAlert(**full_data)
+        object_id = full_data["objectId"]
 
         try:
             lsst_id = full_data["aliases"]["LSST"][0]
@@ -174,13 +202,16 @@ class Source(BaseModel):
         ]
 
         return cls(
-            objectid=alert.objectId,
+            objectid=object_id,
             lsstid=lsst_id,
-            ztfid=alert.objectId,
+            ztfid=object_id,
             photometry=photometry,
-            offset=alert.candidate.distpsnr1,
+            offset=full_data["candidate"]["distpsnr1"],
             host_origin="PS1",
-            **alert.candidate.model_dump(),
+            ra=full_data["candidate"]["ra"],
+            dec=full_data["candidate"]["dec"],
+            jd=full_data["candidate"]["jd"],
+            crossmatches=full_data["cross_matches"],
         )
 
     def show_lightcurve(self, min_snr: float = 3.0) -> plt.Figure:
@@ -247,9 +278,11 @@ class Source(BaseModel):
         :return: None
         """
         source_path = get_source_path(self.objectid, base_path)
+        crossmatch_path = get_crossmatch_path(self.objectid, base_path)
         photometry_path = get_photometry_path(self.objectid, base_path)
 
         source_path.parent.mkdir(parents=True, exist_ok=True)
+        crossmatch_path.parent.mkdir(parents=True, exist_ok=True)
         photometry_path.parent.mkdir(parents=True, exist_ok=True)
 
         # source metadata row
@@ -258,10 +291,13 @@ class Source(BaseModel):
             for k, v in self.model_dump(
                 exclude_defaults=True, exclude_computed_fields=True
             ).items()
-            if k != "photometry"
+            if k not in ["photometry", "crossmatches"]
         }
 
         pd.DataFrame([meta]).to_parquet(source_path, compression="zstd")
+
+        # Dump crossmatches to json
+        crossmatch_path.write_text(json.dumps(self.crossmatches))
 
         # photometry
         df = (
@@ -288,14 +324,14 @@ class Source(BaseModel):
         """
         meta = pd.read_parquet(get_source_path(object_id, base_path))
         photometry_df = pd.read_parquet(get_photometry_path(object_id, base_path))
+        crossmatches = json.loads(get_crossmatch_path(object_id, base_path).read_text())
 
         photometry = [
             Observation(**row) for row in photometry_df.to_dict(orient="records")
         ]
 
         return cls(
-            **meta.iloc[0].to_dict(),
-            photometry=photometry,
+            **meta.iloc[0].to_dict(), photometry=photometry, crossmatches=crossmatches
         )
 
     # def to_archive(self):
