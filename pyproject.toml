@@ -49,6 +49,7 @@ dev = [
     "autotyping",
     "mypy",
     "jupyter",
+    "tqdm",
     "astropy",
 ]
 

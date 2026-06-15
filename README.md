@@ -23,6 +23,12 @@ export BOOM_PASSWORD="your_password"
 
 or by copying the `.env.example` file to `.env` and filling in your credentials there.
 
+If you want to use the parquet cache, you should also set this in the same way via env:
+
+```bash
+export BLASTWAVE_DATA_DIR="/path/to/cache/dir"
+```
+
 # Usage
 
 See example Jupyter notebooks for usage examples.

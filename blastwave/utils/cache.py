@@ -17,9 +17,9 @@ def get_data_dir(data_dir: Path | str | None = None) -> Path:
     :param data_dir: Path to data directory
     :return: Path to default data directory
     """
-    _data_dir = data_dir or os.getenv("DATA_DIR")
+    _data_dir = data_dir or os.getenv("BLASTWAVE_DATA_DIR")
     if _data_dir is None:
-        raise ValueError("DATA_DIR environment variable not set")
+        raise ValueError("'BLASTWAVE_DATA_DIR' environment variable not set")
     return Path(_data_dir)
 
 
@@ -65,6 +65,16 @@ def get_source_path(object_id: str | int, data_dir: Path | str | None = None) ->
     :return: Path to source file
     """
     return get_source_dir(data_dir) / f"{object_id}.parquet"
+
+
+def get_consolidated_source_path(data_dir: Path | str | None = None) -> Path:
+    """
+    Get path to consolidated source file
+
+    :param data_dir: Path to data directory
+    :return: Path to consolidated source file
+    """
+    return get_data_dir(data_dir) / "consolidated_source.parquet"
 
 
 def get_photometry_dir(data_dir: Path | str | None = None) -> Path:

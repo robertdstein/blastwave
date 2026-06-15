@@ -6,12 +6,15 @@ import json
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-from babamul.models import LsstAlert
+import pyarrow as pa
+import pyarrow.parquet as pq
 from matplotlib import pyplot as plt
 from pydantic import BaseModel, computed_field
 
 from blastwave.models.observation import Observation
+from blastwave.models.parquet import pydantic_to_arrow_schema
 from blastwave.utils import (
     get_crossmatch_path,
     get_photometry_path,
@@ -27,7 +30,7 @@ class Source(BaseModel):
     Model for a Source
     """
 
-    objectid: int | str
+    objectid: str
     jd: float
     ztfid: str | None = None
     lsstid: str | None = None
@@ -102,6 +105,16 @@ class Source(BaseModel):
         """
         return self.jdendhist - self.jdstarthist
 
+    @computed_field
+    @property
+    def peak_mag(self) -> float:
+        """
+        Get peak magnitude of source (brightest positive detection)
+
+        :return: Peak magnitude of source
+        """
+        return float(self.get_detections()["magpsf"].min())
+
     def get_photometry(self) -> pd.DataFrame:
         """
         Get photometry as DataFrame
@@ -110,21 +123,49 @@ class Source(BaseModel):
         """
         return pd.DataFrame([x.model_dump() for x in self.photometry])
 
-    def get_detections(self, min_snr: float = 3.0) -> pd.DataFrame:
+    def get_crossmatches(self) -> dict[str, list[dict]]:
+        """
+        Get crossmatches as dict
+
+        :return: Dictionary of crossmatches
+        """
+        return self.crossmatches if self.crossmatches else {}
+
+    def get_detections(
+        self,
+        min_snr: float = 3.0,
+        include_lsst_fp: bool = False,
+    ) -> pd.DataFrame:
         """
         Get positive detections from photometry
 
         :param min_snr: Minimum SNR of positive detections
+        :param include_lsst_fp: Include LSST FP detections
         :return: DataFrame of positive detections
         """
         df = self.get_photometry()
-        positive_det_mask = (
-            df["isdiffpos"].astype(bool)
-            & (pd.notnull(df["magpsf"]))
-            & (df["snr"] > min_snr)
-            & ~(df["magpsf"] > (df["diffmaglim"] + 1.0))
-        )
-        return df[positive_det_mask].reset_index(drop=True)
+        if len(df) > 0:
+            positive_det_mask = (
+                df["isdiffpos"].astype(bool)
+                & (pd.notnull(df["magpsf"]))
+                & (df["snr"] > min_snr)
+                & ~(df["magpsf"] > (df["diffmaglim"] + 1.0))
+            )
+            if not include_lsst_fp:
+                lsst_mask = (df["det_type"] == "fp") & (df["survey"] == "LSST")
+                positive_det_mask &= ~lsst_mask
+            df = df[positive_det_mask].reset_index(drop=True)
+        return df
+
+    @classmethod
+    def get_arrow_schema(cls, include_computed: bool = False) -> pa.Schema:
+        """
+        Function to return Arrow schema
+
+        :param include_computed: Include computed fields from pydantic
+        :return: Schema
+        """
+        return pydantic_to_arrow_schema(cls, include_computed=include_computed)
 
     @classmethod
     def from_lsst(cls, full_data: dict, photometry_df: pd.DataFrame) -> "Source":
@@ -136,10 +177,10 @@ class Source(BaseModel):
         :return: Source object
         """
 
-        alert = LsstAlert(**full_data)
+        object_id = full_data["objectId"]
 
         try:
-            ztf_id = full_data["aliases"]["LSST"][0]
+            ztf_id = full_data["aliases"]["ZTF"][0]
         except (IndexError, KeyError):
             ztf_id = None
 
@@ -163,22 +204,24 @@ class Source(BaseModel):
                     offset_origin = key
                     if "z" in match:
                         redshift = match["z"]
-                        redshift_error = match["z_unc"]
+                        redshift_error = match.get("z_unc", None)
                         redshift_origin = f"{key}_{match["z_tech"]}"
                     break
 
         return cls(
-            objectid=alert.objectId,
-            lsstid=alert.objectId,
+            objectid=object_id,
+            lsstid=object_id,
             ztfid=ztf_id,
             photometry=photometry,
             offset=offset,
             host_origin=offset_origin,
+            ra=full_data["candidate"]["ra"],
+            dec=full_data["candidate"]["dec"],
+            jd=full_data["candidate"]["jd"],
             crossmatches=crossmatches,
             redshift=redshift,
             redshift_error=redshift_error,
             redshift_origin=redshift_origin,
-            **alert.candidate.model_dump(),
         )
 
     @classmethod
@@ -285,16 +328,20 @@ class Source(BaseModel):
         crossmatch_path.parent.mkdir(parents=True, exist_ok=True)
         photometry_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # source metadata row
-        meta = {
-            k: v
-            for k, v in self.model_dump(
-                exclude_defaults=True, exclude_computed_fields=True
-            ).items()
-            if k not in ["photometry", "crossmatches"]
-        }
+        # Split out photometry and crossmatches
+        del_cols = ["photometry", "crossmatches"]
 
-        pd.DataFrame([meta]).to_parquet(source_path, compression="zstd")
+        # source metadata row
+        meta = pd.DataFrame(
+            [{k: v for k, v in self.model_dump().items() if k not in del_cols}]
+        )
+
+        schema = Source.get_arrow_schema(include_computed=True)
+        for field in del_cols:
+            schema = schema.remove(schema.get_field_index(field))
+        # meta = meta[[x for x in schema.names]]
+        table = pa.Table.from_pandas(meta, schema=schema)
+        pq.write_table(table, source_path, compression="zstd")
 
         # Dump crossmatches to json
         crossmatch_path.write_text(json.dumps(self.crossmatches))
@@ -309,7 +356,8 @@ class Source(BaseModel):
         # Clip derived columns
         df = df[list(Observation.model_fields.keys())]
 
-        df.to_parquet(photometry_path, compression="zstd")
+        table = pa.Table.from_pandas(df, schema=Observation.get_arrow_schema())
+        pq.write_table(table, photometry_path, compression="zstd")
 
     @classmethod
     def from_parquet(
@@ -323,6 +371,9 @@ class Source(BaseModel):
         :return: Source object
         """
         meta = pd.read_parquet(get_source_path(object_id, base_path))
+
+        meta = meta.replace({np.nan: None})
+
         photometry_df = pd.read_parquet(get_photometry_path(object_id, base_path))
         crossmatches = json.loads(get_crossmatch_path(object_id, base_path).read_text())
 
