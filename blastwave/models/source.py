@@ -24,6 +24,15 @@ from blastwave.utils import (
 
 logger = logging.getLogger(__name__)
 
+FID_MAPPING = {
+    "g": "1",
+    "r": "2",
+    "i": "3",
+    "u": "-1",
+    "z": "-2",
+    "y": "-3",
+}
+
 
 class Source(BaseModel):
     """
@@ -398,20 +407,26 @@ class Source(BaseModel):
     #     with open(output_path, "w") as f:
     #         json.dump(res, f, indent=4)
     #
-    # def convert_to_ztfstyle(self) -> dict:
-    #     res = self.model_dump()
-    #     cand = {key: val for key, val in res.items() if key not in ["photometry"]}
-    #     res["candidate"] = cand
-    #     res["objectId"] = self.objectid
-    #
-    #     df = self.get_detections()
-    #
-    #     df["fid"] = df["band"].map(FID_MAPPING).astype("Int8")
-    #     df["filter"] = df["band"]
-    #
-    #     match = df.iloc[-1]
-    #
-    #     res["candidate"].update(match.to_dict())
-    #     res["prv_candidates"] = df[:-1].to_dict(orient="records")
-    #
-    #     return res
+    def convert_to_ztfstyle(self) -> dict:
+        """
+        Convert Source object to ZTF-style dictionary,
+        with candidate and previous candidates
+
+        :return: ZTF-style dictionary (like Kowalski)
+        """
+        res = self.model_dump()
+        cand = {key: val for key, val in res.items() if key not in ["photometry"]}
+        res["candidate"] = cand
+        res["objectId"] = self.objectid
+
+        df = self.get_detections()
+
+        df["fid"] = df["band"].map(FID_MAPPING).astype("Int8")
+        df["filter"] = df["band"]
+
+        match = df.iloc[-1]
+
+        res["candidate"].update(match.to_dict())
+        res["prv_candidates"] = df[:-1].to_dict(orient="records")
+
+        return res
