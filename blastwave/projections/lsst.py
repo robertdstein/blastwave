@@ -2,6 +2,8 @@
 LSST alert projections
 """
 
+# pylint: disable=duplicate-code
+
 prefixes = ["prv_candidates", "fp_hists"]
 fields = [
     "jd",

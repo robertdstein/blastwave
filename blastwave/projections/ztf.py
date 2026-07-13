@@ -2,6 +2,8 @@
 Minimal projections for ZTF
 """
 
+# pylint: disable=duplicate-code
+
 ztf_alert_projection = {
     "objectId": 1,
     "candidate.distpsnr1": 1,
