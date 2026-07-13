@@ -214,7 +214,7 @@ class Source(BaseModel):
                     if "z" in match:
                         redshift = match["z"]
                         redshift_error = match.get("z_unc", None)
-                        redshift_origin = f"{key}_{match["z_tech"]}"
+                        redshift_origin = f"{key}_{match['z_tech']}"
                     break
 
         return cls(

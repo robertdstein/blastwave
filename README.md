@@ -1,10 +1,18 @@
 # blastwave
 
-Python client for BOOM queries, similar to penquins ().
+Python client for BOOM queries, similar to [penquins](https://github.com/dmitryduev/penquins).
 
 # Installation
 
 # Install blastwave with pip:
+
+The simplest way to install blastwave is via pip:
+
+```bash
+pip install blastwave
+```
+
+or, if you want to edit the code yourself:
 
 ```bash
 git clone git@github.com:robertdstein/blastwave.git
