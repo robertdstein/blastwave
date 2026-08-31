@@ -166,7 +166,7 @@ class AlertClient(BoomClient, ABC):
             aux_data["candidate"]["ra"], aux_data["candidate"]["dec"], unit="deg"
         )
 
-        for cat in ["LSPSC", "NED", "PS1_DR2"]:
+        for cat in ["LSPSC", "NED"]:
             matches = self.cone_search(
                 src_position.ra.deg, src_position.dec.deg, catalog=cat, limit=1
             )

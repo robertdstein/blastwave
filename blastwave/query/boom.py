@@ -182,7 +182,11 @@ class BoomClient:
         res = self.api(
             "post", "queries/find", data=boom_query.model_dump(exclude_none=True)
         )
-        res.raise_for_status()
+
+        if not res.ok:
+            logger.error(f"Query failed with {boom_query}")
+            res.raise_for_status()
+
         return res.json()["data"]
 
     def count(self, query: CatalogQuery | FilterQuery | BOOMQuery | dict) -> int:
