@@ -1,5 +1,10 @@
 # blastwave
 
+[![Coverage Status](https://coveralls.io/repos/github/robertdstein/blastwave/badge.svg?branch=tests)](https://coveralls.io/github/robertdstein/blastwave?branch=tests)
+[![CI](https://github.com/robertdstein/blastwave/actions/workflows/continuous_integration.yml/badge.svg)](https://github.com/robertdstein/blastwave/actions/workflows/continuous_integration.yml) 
+[![PyPI version](https://badge.fury.io/py/blastwave.svg)](https://badge.fury.io/py/blastwave)
+
+
 Python client for BOOM queries, similar to [penquins](https://github.com/dmitryduev/penquins).
 
 # Installation

@@ -32,3 +32,4 @@ fields = [
 
 ztf_aux_projection = {f"{prefix}.{field}": 1 for prefix in prefixes for field in fields}
 ztf_aux_projection["aliases"] = 1
+ztf_aux_projection["cross_matches"] = 1
