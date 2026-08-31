@@ -70,6 +70,7 @@ max-line-length = "88"
 disable=["logging-fstring-interpolation"]
 #good-names=["ax", "ra", "df", "pi", "i"]
 extension-pkg-whitelist=["extinction"]
+max-public-methods=25
 
 [tool.pylint.design]
 ignored-argument-names = "self|cls"
