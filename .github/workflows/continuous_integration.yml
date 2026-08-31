@@ -45,10 +45,15 @@ jobs:
           pip install --editable ".[dev]"
 
       - name: Run tests
+        run: coverage run -m unittest discover tests
+
+      - name: Run live BOOM API tests
+        if: ${{ matrix.python-version == '3.11' }}
         env:
+          BOOM_LIVE_TESTS: "1"
           BOOM_API_USER: ${{ secrets.BOOM_API_USER }}
           BOOM_API_PASSWORD: ${{ secrets.BOOM_API_PASSWORD }}
-        run: coverage run -m unittest discover tests
+        run: coverage run -a -m unittest tests.test_boom -v
 
       - name: Run Coveralls
         continue-on-error: true

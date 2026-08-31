@@ -3,6 +3,7 @@ Script to test BOOM
 """
 
 import logging
+import os
 import time
 import unittest
 
@@ -10,7 +11,12 @@ from blastwave import BoomClient
 
 logger = logging.getLogger(__name__)
 
+RUN_LIVE_TESTS = os.getenv("BOOM_LIVE_TESTS") == "1"
 
+
+@unittest.skipUnless(
+    RUN_LIVE_TESTS, "Set BOOM_LIVE_TESTS=1 to run tests against the live BOOM API"
+)
 class TestAPI(unittest.TestCase):
     """
     Class for testing API
