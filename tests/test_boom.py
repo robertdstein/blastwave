@@ -3,6 +3,7 @@ Script to test BOOM
 """
 
 import logging
+import os
 import time
 import unittest
 
@@ -10,7 +11,12 @@ from blastwave import BoomClient
 
 logger = logging.getLogger(__name__)
 
+SKIP_LIVE_TESTS = os.getenv("BOOM_SKIP_LIVE_TESTS", "").lower() in ("1", "true")
 
+
+@unittest.skipIf(
+    SKIP_LIVE_TESTS, "BOOM_SKIP_LIVE_TESTS is set; skipping live BOOM API tests"
+)
 class TestAPI(unittest.TestCase):
     """
     Class for testing API
