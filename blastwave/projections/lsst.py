@@ -19,6 +19,11 @@ fields = [
     "psfFluxErr",
     "reliability",
     "isDipole",
+    "centroid_flag",
+    "isNegative",
+    "psfFlux_flag",
+    "pixelFlags",
+    "glint_trail",
 ]
 
 lsst_aux_projection = {

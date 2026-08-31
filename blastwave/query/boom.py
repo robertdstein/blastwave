@@ -19,6 +19,7 @@ from blastwave.query.timeout import DEFAULT_TIMEOUT, TimeoutHTTPAdapter
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.kaboom.caltech.edu"
+BOOM_POOL_MAXSIZE = 32
 
 
 class BoomClient:
@@ -47,18 +48,18 @@ class BoomClient:
         """
         Set up a session for sending requests to BOOM.
 
-        :return: None
+        :return: Session
         """
-        # session to talk to SkyPortal
         session = requests.Session()
-
         retries = Retry(
             total=5,
-            backoff_factor=2,
-            status_forcelist=[405, 429, 500, 502, 503, 504],
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "PUT", "POST", "PATCH"],
         )
-        adapter = TimeoutHTTPAdapter(max_retries=retries)
+        adapter = TimeoutHTTPAdapter(
+            max_retries=retries, pool_maxsize=BOOM_POOL_MAXSIZE
+        )
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         return session
@@ -318,7 +319,6 @@ class BoomClient:
         :param limit: Number of results to return
         :return: List of search results (possibly of length 0 if there are no results)
         """
-
         res = self.query(
             BOOMQuery(
                 catalog_name=self.resolve_catalog(catalog),

@@ -72,7 +72,7 @@ class Source(BaseModel):
 
         :return: List of unique filters
         """
-        return list(set(self.get_detections()["band"]))
+        return list(set(self.get_detections()["band"])) if self.ndethist > 0 else []
 
     @computed_field
     @property
@@ -92,7 +92,7 @@ class Source(BaseModel):
 
         :return: JD of first positive detection
         """
-        return float(self.get_detections()["jd"].min())
+        return float(self.get_detections()["jd"].min()) if self.ndethist > 0 else np.nan
 
     @computed_field
     @property
@@ -102,7 +102,7 @@ class Source(BaseModel):
 
         :return: JD of last positive detection
         """
-        return float(self.get_detections()["jd"].max())
+        return float(self.get_detections()["jd"].max()) if self.ndethist > 0 else np.nan
 
     @computed_field
     @property
@@ -122,7 +122,37 @@ class Source(BaseModel):
 
         :return: Peak magnitude of source
         """
-        return float(self.get_detections()["magpsf"].min())
+        return (
+            float(self.get_detections()["magpsf"].min())
+            if self.ndethist > 0
+            else np.nan
+        )
+
+    @computed_field
+    @property
+    def median_ra(self) -> float:
+        """
+        Get median RA of source
+
+        :return: Median RA of source
+        """
+        return (
+            float(self.get_detections()["ra"].median()) if self.ndethist > 0 else np.nan
+        )
+
+    @computed_field
+    @property
+    def median_dec(self) -> float:
+        """
+        Get median Dec of source
+
+        :return: Median Dec of source
+        """
+        return (
+            float(self.get_detections()["dec"].median())
+            if self.ndethist > 0
+            else np.nan
+        )
 
     def get_photometry(self) -> pd.DataFrame:
         """
@@ -205,7 +235,7 @@ class Source(BaseModel):
         redshift_origin = None
 
         crossmatches = full_data["cross_matches"]
-        for key in ["NED", "LSPSC", "PS1_DR1"]:
+        for key in ["NED", "DESI_DR1", "LSPSC", "PS1_DR2"]:
             if key in crossmatches:
                 if len(crossmatches[key]) > 0:
                     match = crossmatches[key][0]
@@ -320,7 +350,7 @@ class Source(BaseModel):
         return cls(**d, photometry=photometry)
 
     def to_parquet(
-        self, base_path: Path | str | None = None, trim_photometry: bool = True
+        self, base_path: Path | str | None = None, trim_photometry: bool = False
     ) -> None:
         """
         Export photometry as parquet file
@@ -362,10 +392,12 @@ class Source(BaseModel):
             else self.get_photometry()
         )
 
-        # Clip derived columns
-        df = df[list(Observation.model_fields.keys())]
-
-        table = pa.Table.from_pandas(df, schema=Observation.get_arrow_schema())
+        if not df.empty:
+            # Clip derived columns
+            df = df[list(Observation.model_fields.keys())]
+            table = pa.Table.from_pandas(df, schema=Observation.get_arrow_schema())
+        else:
+            table = Observation.get_arrow_schema().empty_table()
         pq.write_table(table, photometry_path, compression="zstd")
 
     @classmethod

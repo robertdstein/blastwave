@@ -11,6 +11,7 @@ from astropy.coordinates import SkyCoord
 from babamul.models import LsstAlert, ZtfAlert
 
 from blastwave.models import BOOMQuery, Source
+from blastwave.projections import lsst_aux_projection, ztf_aux_projection
 from blastwave.query.boom import BoomClient
 from blastwave.utils.photometry import (
     deduplicate_lsst_photometry,
@@ -20,6 +21,11 @@ from blastwave.utils.photometry import (
 parse_map = {
     "ZTF_alerts": deduplicate_ztf_photometry,
     "LSST_alerts": deduplicate_lsst_photometry,
+}
+
+trim_projection_map = {
+    "ZTF_alerts": ztf_aux_projection,
+    "LSST_alerts": lsst_aux_projection,
 }
 
 GenerateFunc = Callable[[dict, pd.DataFrame], Source]
@@ -89,6 +95,7 @@ class AlertClient(BoomClient, ABC):
         object_id: str | int,
         catalog: str | None = None,
         projection: dict | None = None,
+        trim: bool = True,
     ) -> dict:
         """
         Get aux data for a given object.
@@ -96,10 +103,15 @@ class AlertClient(BoomClient, ABC):
         :param object_id: Object ID
         :param catalog: Parent catalog name (e.g. ZTF_alerts or LSST_alerts)
         :param projection: Projection for fields to return
+        :param trim: Whether to trim the data
         :return: Dictionary of the aux data for the given object ID
         """
 
         aux_table = f"{catalog}_aux" if catalog is not None else self.aux_table
+
+        if trim & (projection is None):
+            projection = trim_projection_map[aux_table.replace("_aux", "")]
+
         query = BOOMQuery(
             catalog_name=aux_table,
             filter={"_id": {"$eq": str(object_id)}},
@@ -113,6 +125,7 @@ class AlertClient(BoomClient, ABC):
         catalog: str | None = None,
         alert_projection: dict | None = None,
         aux_projection: dict | None = None,
+        trim: bool = False,
     ) -> dict:
         """
         Get full data for a given object, combining the latest alert and aux data.
@@ -121,13 +134,14 @@ class AlertClient(BoomClient, ABC):
         :param catalog: Parent catalog name (e.g. ZTF_alerts or LSST_alerts)
         :param alert_projection: Projection for fields to return for alert
         :param aux_projection: Projection for fields to return for aux data
+        :param trim: Whether to trim the data
         :return: Dictionary of the aux data for the given object ID
         """
         latest = self.get_latest_alert(
             object_id, catalog=catalog, projection=alert_projection
         )
         aux_data = self.get_aux_data(
-            object_id, catalog=catalog, projection=aux_projection
+            object_id, catalog=catalog, projection=aux_projection, trim=trim
         )
         aux_data.update(latest)
         aux_data = self.update_crossmatches(aux_data)
@@ -141,11 +155,18 @@ class AlertClient(BoomClient, ABC):
         :return: Updated aux data with cross-matches
         """
 
+        if not "cross_matches" in aux_data:
+            aux_data["cross_matches"] = {}
+
+        aux_data["cross_matches"] = {
+            k: v for k, v in aux_data["cross_matches"].items() if k != ""
+        }
+
         src_position = SkyCoord(
             aux_data["candidate"]["ra"], aux_data["candidate"]["dec"], unit="deg"
         )
 
-        for cat in ["LSPSC", "NED"]:
+        for cat in ["LSPSC", "NED", "PS1_DR2"]:
             matches = self.cone_search(
                 src_position.ra.deg, src_position.dec.deg, catalog=cat, limit=1
             )
@@ -213,12 +234,13 @@ class AlertClient(BoomClient, ABC):
         parse_f = parse_map[catalog]
         photometry_df = parse_f(full_alert)
         photometry_df["survey"] = catalog.split("_")[0]
-        match_photometry = self.get_all_match_photometry(full_alert["aliases"])
 
-        if len(match_photometry) > 0:
-            photometry_df = pd.concat(
-                [photometry_df, match_photometry], ignore_index=True
-            )
+        if "aliases" in full_alert:
+            match_photometry = self.get_all_match_photometry(full_alert["aliases"])
+            if len(match_photometry) > 0:
+                photometry_df = pd.concat(
+                    [photometry_df, match_photometry], ignore_index=True
+                )
 
         photometry_df = (
             photometry_df.sort_values(by="jd").reset_index(drop=True)

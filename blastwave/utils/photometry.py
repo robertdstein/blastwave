@@ -36,9 +36,10 @@ def deduplicate_ztf_photometry(full_data: dict) -> pd.DataFrame:
     df = df[[x for x in df.columns if x not in ["snr"]]]
 
     mask = (
-        (df["nbad"] > 1)
-        | (df["fwhm"] > 5)
-        | (df["rb"] < 0.3)
+        (df.get("nbad", default=np.zeros(len(df))) > 1)
+        # | (df["fwhm"] > 5)
+        | (df.get("drb", 0.7 * np.ones(len(df))) < 0.65)
+        # # | (df["rb"] < 0.3)
         | (df["diffmaglim"] < 19.0)
         | (df["psfFlux"] < 0.0)
     )
