@@ -11,11 +11,11 @@ from blastwave import BoomClient
 
 logger = logging.getLogger(__name__)
 
-RUN_LIVE_TESTS = os.getenv("BOOM_LIVE_TESTS") == "1"
+SKIP_LIVE_TESTS = os.getenv("BOOM_SKIP_LIVE_TESTS", "").lower() in ("1", "true")
 
 
-@unittest.skipUnless(
-    RUN_LIVE_TESTS, "Set BOOM_LIVE_TESTS=1 to run tests against the live BOOM API"
+@unittest.skipIf(
+    SKIP_LIVE_TESTS, "BOOM_SKIP_LIVE_TESTS is set; skipping live BOOM API tests"
 )
 class TestAPI(unittest.TestCase):
     """
