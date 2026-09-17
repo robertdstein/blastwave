@@ -7,7 +7,7 @@ import os
 import time
 import unittest
 
-from blastwave import BoomClient
+from blastwave import BOOMClient
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class TestAPI(unittest.TestCase):
     Class for testing API
     """
 
-    boom = BoomClient()
+    boom = BOOMClient()
 
     def test_ping(self):
         """
