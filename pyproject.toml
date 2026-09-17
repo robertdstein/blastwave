@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blastwave"
-version = "1.1.0"
+version = "1.2.0"
 description = ""
 authors = [
     {name = "Robert Stein", email = "rdstein@umd.edu"}
@@ -32,7 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "backoff",
-    "dotenv",
+    "python-dotenv",
     "babamul",
     "polars",
     "matplotlib",
@@ -68,7 +68,7 @@ profile = "black"
 [tool.pylint.format]
 max-line-length = "88"
 disable=["logging-fstring-interpolation"]
-#good-names=["ax", "ra", "df", "pi", "i"]
+good-names=["ax", "ra", "df", "pi", "i"]
 extension-pkg-whitelist=["extinction"]
 max-public-methods=25
 

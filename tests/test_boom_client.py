@@ -11,7 +11,7 @@ from unittest import mock
 
 from blastwave.errors import BOOMCredentialsError
 from blastwave.models.query import BOOMQuery
-from blastwave.query.boom import BASE_URL, BoomClient
+from blastwave.query.boom import BASE_URL, BOOMClient
 
 
 def mock_response(json_data, status_code=200):
@@ -35,16 +35,16 @@ class TestGetNearSphereDist(unittest.TestCase):
         # function's own numpy expression.
         radius_arcsec = 20.0
         expected = math.radians(radius_arcsec / 3600.0) * 6371008.8
-        self.assertAlmostEqual(BoomClient.get_near_sphere_dist(radius_arcsec), expected)
+        self.assertAlmostEqual(BOOMClient.get_near_sphere_dist(radius_arcsec), expected)
 
     def test_scales_linearly(self):
         self.assertAlmostEqual(
-            BoomClient.get_near_sphere_dist(20.0) * 2,
-            BoomClient.get_near_sphere_dist(40.0),
+            BOOMClient.get_near_sphere_dist(20.0) * 2,
+            BOOMClient.get_near_sphere_dist(40.0),
         )
 
     def test_zero_radius_is_zero(self):
-        self.assertEqual(BoomClient.get_near_sphere_dist(0.0), 0.0)
+        self.assertEqual(BOOMClient.get_near_sphere_dist(0.0), 0.0)
 
 
 class TestResolveCatalog(unittest.TestCase):
@@ -53,22 +53,22 @@ class TestResolveCatalog(unittest.TestCase):
     """
 
     def test_explicit_catalog_wins(self):
-        client = BoomClient()
+        client = BOOMClient()
         self.assertEqual(client.resolve_catalog("milliquas_v8"), "milliquas_v8")
 
     def test_raises_without_catalog(self):
-        client = BoomClient()
+        client = BOOMClient()
         with self.assertRaises(ValueError):
             client.resolve_catalog(None)
 
 
 class TestApi(unittest.TestCase):
     """
-    Tests for BoomClient.api, using a mocked session so no HTTP call is made.
+    Tests for BOOMClient.api, using a mocked session so no HTTP call is made.
     """
 
     def setUp(self):
-        self.client = BoomClient()
+        self.client = BOOMClient()
         self.session = mock.Mock()
         self.client._session = self.session
         self.client._session_headers = {"Authorization": "Bearer TOKEN"}
@@ -104,11 +104,11 @@ class TestApi(unittest.TestCase):
 
 class TestSessionHeaders(unittest.TestCase):
     """
-    Tests for BoomClient.get_session_headers caching
+    Tests for BOOMClient.get_session_headers caching
     """
 
     def test_token_only_fetched_once(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(
             client, "_get_boom_token", return_value="TOKEN"
         ) as get_token:
@@ -127,7 +127,7 @@ class TestGetBoomToken(unittest.TestCase):
     """
 
     def test_missing_user_raises(self):
-        client = BoomClient()
+        client = BOOMClient()
         with (
             mock.patch("blastwave.query.boom.load_dotenv"),
             mock.patch.dict("os.environ", {}, clear=True),
@@ -136,7 +136,7 @@ class TestGetBoomToken(unittest.TestCase):
                 client._get_boom_token()
 
     def test_missing_password_raises(self):
-        client = BoomClient()
+        client = BOOMClient()
         with (
             mock.patch("blastwave.query.boom.load_dotenv"),
             mock.patch.dict("os.environ", {"BOOM_API_USER": "user"}, clear=True),
@@ -145,7 +145,7 @@ class TestGetBoomToken(unittest.TestCase):
                 client._get_boom_token()
 
     def test_valid_credentials_fetch_fresh_token(self):
-        client = BoomClient()
+        client = BOOMClient()
         with (
             mock.patch("blastwave.query.boom.load_dotenv"),
             mock.patch.dict(
@@ -169,14 +169,14 @@ class TestGetFreshToken(unittest.TestCase):
     """
 
     def test_success_returns_access_token(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch("blastwave.query.boom.requests.post") as post:
             post.return_value = mock_response({"access_token": "abc123"})
             token = client.get_fresh_token("user", "pass")
         self.assertEqual(token, "abc123")
 
     def test_failure_raises_credentials_error(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch("blastwave.query.boom.requests.post") as post:
             response = mock.Mock(status_code=401, text="unauthorized")
             post.return_value = response
@@ -190,7 +190,7 @@ class TestQueryAndCount(unittest.TestCase):
     """
 
     def test_query_builds_boom_query_and_hits_find_endpoint(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "api") as api:
             api.return_value = mock_response({"data": [{"ra": 1.0}]})
             res = client.query(
@@ -204,7 +204,7 @@ class TestQueryAndCount(unittest.TestCase):
         self.assertEqual(kwargs["data"]["catalog_name"], "milliquas_v8")
 
     def test_query_accepts_boom_query_instance(self):
-        client = BoomClient()
+        client = BOOMClient()
         query = BOOMQuery(catalog_name="milliquas_v8", limit=3)
         with mock.patch.object(client, "api") as api:
             api.return_value = mock_response({"data": []})
@@ -213,7 +213,7 @@ class TestQueryAndCount(unittest.TestCase):
         self.assertEqual(kwargs["data"]["limit"], 3)
 
     def test_count_hits_count_endpoint(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "api") as api:
             api.return_value = mock_response({"data": 42})
             res = client.count({"catalog_name": "milliquas_v8"})
@@ -229,7 +229,7 @@ class TestPing(unittest.TestCase):
     """
 
     def test_calls_root_endpoint(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "api") as api:
             client.ping()
         api.assert_called_once_with("get", "")
@@ -241,7 +241,7 @@ class TestGetCatalogs(unittest.TestCase):
     """
 
     def test_caches_result(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "api") as api:
             api.return_value = mock_response(
                 {"data": [{"name": "milliquas_v8"}, {"name": "CatWISE2020"}]}
@@ -260,7 +260,7 @@ class TestGetEntryCount(unittest.TestCase):
     """
 
     def test_hits_estimated_count_endpoint(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "api") as api:
             api.return_value = mock_response({"data": 2224655225})
             count = client.get_entry_count("CatWISE2020")
@@ -271,7 +271,7 @@ class TestGetEntryCount(unittest.TestCase):
         self.assertEqual(kwargs["data"], {"catalog_name": "CatWISE2020"})
 
     def test_requires_catalog(self):
-        client = BoomClient()
+        client = BOOMClient()
         with self.assertRaises(ValueError):
             client.get_entry_count()
 
@@ -282,7 +282,7 @@ class TestGetCatalogIndexesAndSampleData(unittest.TestCase):
     """
 
     def test_get_catalog_indexes_uses_resolved_catalog_in_endpoint(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "api") as api:
             api.return_value = mock_response({"data": ["ra", "dec"]})
             res = client.get_catalog_indexes("CatWISE2020")
@@ -292,7 +292,7 @@ class TestGetCatalogIndexesAndSampleData(unittest.TestCase):
         self.assertEqual(args[1], "/catalogs/CatWISE2020/indexes")
 
     def test_get_sample_data_uses_resolved_catalog_in_endpoint(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "api") as api:
             api.return_value = mock_response({"data": [{"ra": 1.0}]})
             res = client.get_sample_data("CatWISE2020")
@@ -304,11 +304,11 @@ class TestGetCatalogIndexesAndSampleData(unittest.TestCase):
 
 class TestConeSearch(unittest.TestCase):
     """
-    Tests for BoomClient.cone_search
+    Tests for BOOMClient.cone_search
     """
 
     def test_builds_near_sphere_query(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "query") as query:
             query.return_value = [{"source_name": "J1"}]
             res = client.cone_search(
@@ -325,11 +325,11 @@ class TestConeSearch(unittest.TestCase):
         )
         self.assertAlmostEqual(
             near_sphere["$maxDistance"],
-            BoomClient.get_near_sphere_dist(20.0),
+            BOOMClient.get_near_sphere_dist(20.0),
         )
 
     def test_default_limit_is_one(self):
-        client = BoomClient()
+        client = BOOMClient()
         with mock.patch.object(client, "query") as query:
             query.return_value = []
             client.cone_search(191.0, -1.0, catalog="CatWISE2020")
@@ -338,7 +338,7 @@ class TestConeSearch(unittest.TestCase):
         self.assertEqual(sent_query.limit, 1)
 
     def test_requires_catalog(self):
-        client = BoomClient()
+        client = BOOMClient()
         with self.assertRaises(ValueError):
             client.cone_search(191.0, -1.0)
 
