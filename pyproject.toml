@@ -32,7 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "backoff",
-    "dotenv",
+    "python-dotenv",
     "babamul",
     "polars",
     "matplotlib",

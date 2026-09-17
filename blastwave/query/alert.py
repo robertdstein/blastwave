@@ -12,7 +12,7 @@ from babamul.models import LsstAlert, ZtfAlert
 
 from blastwave.models import BOOMQuery, Source
 from blastwave.projections import lsst_aux_projection, ztf_aux_projection
-from blastwave.query.boom import BoomClient
+from blastwave.query.boom import BOOMClient
 from blastwave.utils.photometry import (
     deduplicate_lsst_photometry,
     deduplicate_ztf_photometry,
@@ -35,7 +35,7 @@ generator_mapping: dict[str, GenerateFunc] = {
 }
 
 
-class AlertClient(BoomClient, ABC):
+class AlertClient(BOOMClient, ABC):
     """
     Base class for Alert Survey Client
     """

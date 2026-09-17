@@ -22,9 +22,9 @@ BASE_URL = "https://api.kaboom.caltech.edu"
 BOOM_POOL_MAXSIZE = 32
 
 
-class BoomClient:
+class BOOMClient:
     """
-    Basic Boom client class for executing functions
+    Basic BOOM client class for executing functions
 
     :param base_url: Base URL to query (default: https://api.kaboom.caltech.edu)
     """
@@ -301,13 +301,15 @@ class BoomClient:
         """
         return ((radius_arcsec / 3600.0) * np.pi / 180.0) * 6371008.8
 
-    def cone_search(
+    def cone_search(  # pylint: disable=too-many-arguments, too-many-positional-arguments
         self,
         ra: float,
         dec: float,
         radius_arcsec: float = 1.0,
         catalog: str | None = None,
         limit: int | None = 1,
+        filter_query: FilterQuery | dict | None = None,
+        projection: dict | None = None,
     ) -> list[dict]:
         """
         Function to do a cone search
@@ -317,23 +319,41 @@ class BoomClient:
         :param radius_arcsec: Search radius (arcsec)
         :param catalog: Catalog name
         :param limit: Number of results to return
+        :param filter_query: Optional filter to use instead of constructing one
+        :param projection: Optional projection to use instead of constructing one
         :return: List of search results (possibly of length 0 if there are no results)
         """
+
+        base_filter = {
+            "coordinates.radec_geojson": {
+                "$nearSphere": {
+                    "$geometry": {
+                        "type": "Point",
+                        "coordinates": [ra - 180.0, dec],
+                    },
+                    "$maxDistance": self.get_near_sphere_dist(radius_arcsec),
+                }
+            }
+        }
+
+        if filter_query is not None:
+            if isinstance(filter_query, dict):
+                filter_query = FilterQuery(
+                    catalog_name=self.resolve_catalog(catalog), filter=filter_query
+                )
+
+            assert filter_query.catalog_name == self.resolve_catalog(
+                catalog
+            ), "Mismatched catalog names in query and function argument"
+
+            base_filter.update(filter_query.filter or {})
+
         res = self.query(
             BOOMQuery(
                 catalog_name=self.resolve_catalog(catalog),
-                filter={
-                    "coordinates.radec_geojson": {
-                        "$nearSphere": {
-                            "$geometry": {
-                                "type": "Point",
-                                "coordinates": [ra - 180.0, dec],
-                            },
-                            "$maxDistance": self.get_near_sphere_dist(radius_arcsec),
-                        }
-                    }
-                },
+                filter=base_filter,
                 limit=limit,
+                projection=projection,
             )
         )
         return res
