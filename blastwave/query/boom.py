@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 import numpy as np
 import requests
 from dotenv import load_dotenv
+from typing_extensions import deprecated
 from urllib3.util import Retry
 
 from blastwave.errors import BOOMCredentialsError
@@ -357,3 +358,10 @@ class BOOMClient:
             )
         )
         return res
+
+
+@deprecated("Use BOOMClient instead")
+class BoomClient(BOOMClient):
+    """
+    Deprecated class for BOOM client. Use BOOMClient instead.
+    """
