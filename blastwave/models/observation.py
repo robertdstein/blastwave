@@ -32,6 +32,7 @@ class Observation(BaseModel):
     survey: str
     det_type: ObsClass = "alert"
     isdiffpos: bool
+    detid: float | None = None
 
     @computed_field()
     @property

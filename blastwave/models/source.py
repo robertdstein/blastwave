@@ -209,7 +209,7 @@ class Source(BaseModel):
     @classmethod
     def from_lsst(cls, full_data: dict, photometry_df: pd.DataFrame) -> "Source":
         """
-        Create Source object from raw ZTF alert
+        Create Source object from raw LSST alert
 
         :param full_data: Full alert data
         :param photometry_df: Photometry data
@@ -438,7 +438,7 @@ class Source(BaseModel):
     #     res = self.model_dump()
     #     with open(output_path, "w") as f:
     #         json.dump(res, f, indent=4)
-    #
+
     def convert_to_ztfstyle(self) -> dict:
         """
         Convert Source object to ZTF-style dictionary,
@@ -451,14 +451,40 @@ class Source(BaseModel):
         res["candidate"] = cand
         res["objectId"] = self.objectid
 
-        df = self.get_detections()
+        df = self.get_photometry().rename(columns={
+            "detid": "candid",
+        })
 
         df["fid"] = df["band"].map(FID_MAPPING).astype("Int8")
         df["filter"] = df["band"]
+        df["pid"] = np.nan
+        df["programid"] = np.nan
+        df["fwhm"] = np.nan
+        df["elong"] = np.nan
+        df["magdiff"] = np.nan
+        df["nbad"] = np.nan
+        df["rb"] = np.nan
+        df["ssdistnr"] = np.nan
+
+        df["jdstarthist"] = self.jdstarthist
+        df["jdendhist"] = df["jd"]
+
+        matches = self.get_crossmatches()
+        if len(matches["PS1_DR2"]) > 0:
+            df["distpsnr1"] = matches["PS1_DR2"][0]["distance_arcsec"]
+            df["sgscore1"] = matches["PS1_DR2"][0]["ps_score"]
+        else:
+            df["distpsnr1"] = np.nan
+            df["sgscore1"] = np.nan
+
+        for i in [2, 3]:
+            df[f"distpsnr{i}"] = np.nan
+            df[f"sgscore{i}"] = np.nan
 
         match = df.iloc[-1]
 
         res["candidate"].update(match.to_dict())
+        res["candid"] = match["candid"]
         res["prv_candidates"] = df[:-1].to_dict(orient="records")
 
         return res

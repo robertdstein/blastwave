@@ -54,6 +54,7 @@ def deduplicate_ztf_photometry(full_data: dict) -> pd.DataFrame:
                 "psfFlux": "psf_flux",
                 "psfFluxErr": "psf_flux_err",
                 "snr_psf": "snr",
+                "candid": "detid"
             }
         )
     )

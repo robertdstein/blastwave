@@ -155,7 +155,7 @@ class AlertClient(BOOMClient, ABC):
         :return: Updated aux data with cross-matches
         """
 
-        if not "cross_matches" in aux_data:
+        if "cross_matches" not in aux_data:
             aux_data["cross_matches"] = {}
 
         aux_data["cross_matches"] = {
