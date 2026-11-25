@@ -48,36 +48,39 @@ See example Jupyter notebooks for usage examples.
 
 # Parallel queries
 
-Queries spend nearly all of their time waiting on the API, so each client can
-run a set of them at once in a pool of threads, rather than one after another:
+Queries spend nearly all of their time waiting on the API, so use a batch method
+to send a set of them at once from a pool of threads:
 
 ```python
 from blastwave import ZTFClient
 
 client = ZTFClient()
-
-# One source at a time
-sources = [client.get_source(x) for x in object_ids]
-
-# All of them at once
 sources = client.batch_get_source(object_ids, progress=True)
 ```
 
 The batch methods are `batch_query`, `batch_count`, `batch_cone_search`,
-`batch_get_full_data` and `batch_get_source`. Each returns one entry per input,
-in the order of the inputs, and takes:
+`batch_get_full_data` and `batch_get_source`. Each one returns a list with one
+entry per input, in the order of the inputs, and takes:
 
-* `n_threads`, to override the client default (set with `ZTFClient(n_threads=16)`)
+* `n_threads`, the number of threads to use for this call
 * `progress`, to show a progress bar
-* `skip_errors`, to log and skip any failed entries, returning `None` in their
-  place, rather than raising the error
+* `skip_errors`, to log and skip any failed entry, returning `None` in its place
+  instead of raising the error
 
-Single queries are also faster, because each client now fetches the alert and
-aux data for a source at the same time, and likewise its crossmatches and the
-photometry of each crossmatched survey.
+Pick the thread count for a client when you create it, up to a limit of 32:
 
-To run everything serially again, use a single thread:
+```python
+client = ZTFClient(n_threads=16)
+```
+
+A single thread sends the queries one at a time:
 
 ```python
 client = ZTFClient(n_threads=1)
 ```
+
+Each `get_source` call uses the pool as well, since it fetches the alert and aux
+data for the source together, and likewise the crossmatches and the photometry
+of each crossmatched survey. Allow for that when choosing a thread count: a
+`batch_get_source` of 16 threads has considerably more than 16 queries in
+flight.
