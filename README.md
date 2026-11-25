@@ -58,9 +58,9 @@ client = ZTFClient()
 sources = client.batch_get_source(object_ids, progress=True)
 ```
 
-The batch methods are `batch_query`, `batch_count`, `batch_cone_search`,
-`batch_get_full_data` and `batch_get_source`. Each one returns a list with one
-entry per input, in the order of the inputs, and takes:
+The batch methods are `batch_query`, `batch_cone_search` and `batch_get_source`.
+Each one returns a list with one entry per input, in the order of the inputs,
+and takes:
 
 * `n_threads`, the number of threads to use for this call
 * `progress`, to show a progress bar
@@ -73,7 +73,8 @@ Any other argument goes to the single-query method behind it, so
 `batch_get_source(object_ids, catalog="LSST_alerts")` passes the catalog to each
 `get_source` call.
 
-Pick the thread count for a client when you create it, up to a limit of 32:
+Pick the thread count for a client when you create it. More than 32 threads is
+no faster, since that is how many connections the session keeps open:
 
 ```python
 client = ZTFClient(n_threads=16)
@@ -85,8 +86,13 @@ A single thread sends the queries one at a time:
 client = ZTFClient(n_threads=1)
 ```
 
-Each `get_source` call uses the pool as well, since it fetches the alert and aux
-data for the source together, and likewise the crossmatches and the photometry
-of each crossmatched survey. Allow for that when choosing a thread count: a
-`batch_get_source` of 16 threads has considerably more than 16 queries in
-flight.
+Any other client method can be run the same way, by handing `run_parallel` one
+call per entry:
+
+```python
+from functools import partial
+
+from blastwave import run_parallel
+
+counts = run_parallel([partial(client.count, query) for query in queries])
+```

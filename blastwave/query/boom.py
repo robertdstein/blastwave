@@ -17,11 +17,7 @@ from urllib3.util import Retry
 
 from blastwave.errors import SKIPPABLE_ERRORS, BOOMCredentialsError
 from blastwave.models.query import BOOMQuery, CatalogQuery, FilterQuery
-from blastwave.query.parallel import (
-    DEFAULT_N_THREADS,
-    run_parallel_funcs,
-    tolerate_errors,
-)
+from blastwave.query.parallel import DEFAULT_N_THREADS, run_parallel
 from blastwave.query.timeout import DEFAULT_TIMEOUT, TimeoutHTTPAdapter
 
 logger = logging.getLogger(__name__)
@@ -47,43 +43,12 @@ class BOOMClient:
         n_threads: int = DEFAULT_N_THREADS,
     ):
         self.base_url = base_url
-        self.n_threads = self.validate_n_threads(n_threads)
+        self.n_threads = n_threads
         self._session: None | requests.Session = None
         self._session_headers: None | dict = None
         self._catalogs: None | list[str] = None
         # So that parallel queries do not each request their own token
         self._lock = threading.RLock()
-        # Never more requests in flight than the connection pool can hold
-        self._request_semaphore = threading.BoundedSemaphore(BOOM_POOL_MAXSIZE)
-
-    @staticmethod
-    def validate_n_threads(n_threads: int) -> int:
-        """
-        Check that a thread count is sane, capping it at the connection pool size.
-
-        :param n_threads: Requested number of threads
-        :return: Number of threads to actually use
-        """
-        if n_threads < 1:
-            raise ValueError(f"n_threads must be at least one, got {n_threads}")
-        if n_threads > BOOM_POOL_MAXSIZE:
-            logger.warning(
-                f"n_threads of {n_threads} exceeds the connection pool size of "
-                f"{BOOM_POOL_MAXSIZE}, so using {BOOM_POOL_MAXSIZE} threads instead."
-            )
-            return BOOM_POOL_MAXSIZE
-        return n_threads
-
-    def _resolve_n_threads(self, n_threads: int | None = None) -> int:
-        """
-        Resolve a thread count, falling back to the client default.
-
-        :param n_threads: Requested number of threads
-        :return: Number of threads to actually use
-        """
-        if n_threads is None:
-            return self.n_threads
-        return self.validate_n_threads(n_threads)
 
     @property
     def catalog(self) -> str | None:
@@ -207,19 +172,18 @@ class BOOMClient:
 
         url = urljoin(self.base_url, endpoint)
 
-        with self._request_semaphore:
-            if method == "get":
-                response = methods[method](
-                    url,
-                    params=data,
-                    headers=headers,
-                )
-            else:
-                response = methods[method](
-                    url,
-                    json=data,
-                    headers=headers,
-                )
+        if method == "get":
+            response = methods[method](
+                url,
+                params=data,
+                headers=headers,
+            )
+        else:
+            response = methods[method](
+                url,
+                json=data,
+                headers=headers,
+            )
 
         return response
 
@@ -268,17 +232,30 @@ class BOOMClient:
             SKIPPABLE_ERRORS, returning None in their place, rather than raising
         :return: List of results, one entry per task, in the order of the tasks
         """
-        funcs: list[Callable[[], R | None]] = (
-            [tolerate_errors(task, SKIPPABLE_ERRORS) for task in tasks]
+        funcs: Sequence[Callable[[], R | None]] = (
+            [partial(self._skip_error, task) for task in tasks]
             if skip_errors
-            else list(tasks)
+            else tasks
         )
-        return run_parallel_funcs(
-            funcs,
-            n_threads=self._resolve_n_threads(n_threads),
-            progress=progress,
-            desc=desc,
-        )
+        if n_threads is None:
+            n_threads = self.n_threads
+        # Never more requests in flight than the connection pool can hold
+        n_threads = min(n_threads, BOOM_POOL_MAXSIZE)
+        return run_parallel(funcs, n_threads=n_threads, progress=progress, desc=desc)
+
+    @staticmethod
+    def _skip_error(task: Callable[[], R]) -> R | None:
+        """
+        Run one task, logging and skipping it if it fails with a skippable error.
+
+        :param task: Task to run
+        :return: Result of the task, or None if it failed with a skippable error
+        """
+        try:
+            return task()
+        except SKIPPABLE_ERRORS as exc:
+            logger.error(f"Task failed, skipping it: {exc}")
+            return None
 
     def batch_query(
         self,
@@ -299,26 +276,6 @@ class BOOMClient:
         """
         tasks = [partial(self.query, query) for query in queries]
         return self.run_batch(tasks, "Queries", n_threads, progress, skip_errors)
-
-    def batch_count(
-        self,
-        queries: Iterable[CatalogQuery | FilterQuery | BOOMQuery | dict],
-        n_threads: int | None = None,
-        progress: bool = False,
-        skip_errors: bool = False,
-    ) -> list[int | None]:
-        """
-        Make count calls for a set of queries, running them in parallel.
-
-        :param queries: Queries to count
-        :param n_threads: Number of threads to use (default: client n_threads)
-        :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip queries which fail with a
-            skippable error, returning None in their place, rather than raising
-        :return: List of counts, one entry per query, in the order of the queries
-        """
-        tasks = [partial(self.count, query) for query in queries]
-        return self.run_batch(tasks, "Counts", n_threads, progress, skip_errors)
 
     def get_fresh_token(self, username: str, password: str) -> str:
         """

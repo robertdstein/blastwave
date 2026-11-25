@@ -11,8 +11,6 @@ from blastwave.query import (
     LSSTClient,
     ZTFClient,
     run_parallel,
-    run_parallel_funcs,
-    tolerate_errors,
 )
 from blastwave.utils import (
     get_crossmatch_path,

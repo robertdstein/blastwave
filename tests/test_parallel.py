@@ -1,5 +1,5 @@
 """
-Unit tests for the parallel helpers used to run queries in a thread pool.
+Unit tests for run_parallel, which runs queries in a thread pool.
 """
 
 # pylint: disable=missing-function-docstring
@@ -7,13 +7,9 @@ Unit tests for the parallel helpers used to run queries in a thread pool.
 import threading
 import time
 import unittest
+from functools import partial
 
-from blastwave.query.parallel import (
-    DEFAULT_N_THREADS,
-    run_parallel,
-    run_parallel_funcs,
-    tolerate_errors,
-)
+from blastwave.query.parallel import run_parallel
 
 
 class TestRunParallel(unittest.TestCase):
@@ -21,103 +17,38 @@ class TestRunParallel(unittest.TestCase):
     Tests for run_parallel
     """
 
-    def test_results_are_in_task_order(self):
-        # Later tasks finish first, so the order has to come from the input
+    def test_results_are_in_func_order(self):
+        # Later funcs finish first, so the order has to come from the input
         def slow_for_small_x(x):
             time.sleep(0.05 * (5 - x))
             return x * 2
 
-        res = run_parallel(slow_for_small_x, range(5), n_threads=5)
+        res = run_parallel(
+            [partial(slow_for_small_x, x) for x in range(5)], n_threads=5
+        )
         self.assertEqual(res, [0, 2, 4, 6, 8])
 
-    def test_tasks_run_concurrently(self):
-        # The barrier only releases if all four tasks are in flight at once
+    def test_funcs_run_concurrently(self):
+        # The barrier only releases if all four funcs are in flight at once
         barrier = threading.Barrier(4, timeout=10)
-        res = run_parallel(lambda x: barrier.wait() >= 0, range(4), n_threads=4)
+        res = run_parallel([lambda: barrier.wait() >= 0] * 4, n_threads=4)
         self.assertEqual(res, [True] * 4)
 
-    def test_no_tasks_returns_no_results(self):
-        self.assertEqual(run_parallel(lambda x: x, []), [])
+    def test_no_funcs_returns_no_results(self):
+        self.assertEqual(run_parallel([]), [])
 
-    def test_single_thread_still_runs_every_task(self):
-        res = run_parallel(lambda x: x + 1, [1, 2, 3], n_threads=1)
-        self.assertEqual(res, [2, 3, 4])
+    def test_single_thread_still_calls_every_func(self):
+        res = run_parallel([partial(int, x) for x in "123"], n_threads=1)
+        self.assertEqual(res, [1, 2, 3])
 
     def test_zero_threads_raises(self):
         with self.assertRaises(ValueError):
-            run_parallel(lambda x: x, [1], n_threads=0)
+            run_parallel([int], n_threads=0)
 
-    def test_error_in_task_is_raised(self):
+    def test_error_in_func_is_raised(self):
         with self.assertRaises(ZeroDivisionError):
-            run_parallel(lambda x: 1 / x, [1, 0, 2], n_threads=3)
+            run_parallel([partial(lambda x: 1 / x, x) for x in [1, 0, 2]], n_threads=3)
 
     def test_progress_bar_does_not_change_results(self):
-        res = run_parallel(lambda x: x, [1, 2, 3], n_threads=2, progress=True)
+        res = run_parallel([partial(int, x) for x in "123"], progress=True)
         self.assertEqual(res, [1, 2, 3])
-
-    def test_consumes_iterators(self):
-        res = run_parallel(lambda x: x, iter([1, 2, 3]), n_threads=2)
-        self.assertEqual(res, [1, 2, 3])
-
-
-class TestRunParallelFuncs(unittest.TestCase):
-    """
-    Tests for run_parallel_funcs
-    """
-
-    def test_each_function_is_called(self):
-        res = run_parallel_funcs([lambda: "a", lambda: "b", lambda: "c"], n_threads=3)
-        self.assertEqual(res, ["a", "b", "c"])
-
-    def test_no_funcs_returns_no_results(self):
-        self.assertEqual(run_parallel_funcs([]), [])
-
-
-class TestTolerateErrors(unittest.TestCase):
-    """
-    Tests for tolerate_errors
-    """
-
-    def test_tolerated_tasks_become_none(self):
-        func = tolerate_errors(lambda x: 1 / x, ZeroDivisionError)
-        with self.assertLogs("blastwave.query.parallel", level="ERROR"):
-            res = run_parallel(func, [1, 0, 4], n_threads=3)
-        self.assertEqual(res, [1.0, None, 0.25])
-
-    def test_other_errors_are_still_raised(self):
-        func = tolerate_errors(lambda x: 1 / x, KeyError)
-        with self.assertRaises(ZeroDivisionError):
-            run_parallel(func, [1, 0], n_threads=2)
-
-    def test_several_error_types_can_be_tolerated(self):
-        def fail(x):
-            raise [KeyError, IndexError][x]("no luck")
-
-        func = tolerate_errors(fail, (KeyError, IndexError))
-        with self.assertLogs("blastwave.query.parallel", level="ERROR"):
-            res = run_parallel(func, [0, 1], n_threads=2)
-        self.assertEqual(res, [None, None])
-
-    def test_successful_task_is_unchanged(self):
-        self.assertEqual(tolerate_errors(lambda x: x * 2, KeyError)(3), 6)
-
-    def test_works_for_zero_argument_functions(self):
-        def fail():
-            raise IndexError("no luck")
-
-        with self.assertLogs("blastwave.query.parallel", level="ERROR"):
-            res = run_parallel_funcs([tolerate_errors(fail, IndexError), lambda: 1])
-        self.assertEqual(res, [None, 1])
-
-
-class TestDefaults(unittest.TestCase):
-    """
-    Tests for the default thread count
-    """
-
-    def test_default_is_more_than_one_thread(self):
-        self.assertGreater(DEFAULT_N_THREADS, 1)
-
-
-if __name__ == "__main__":
-    unittest.main()

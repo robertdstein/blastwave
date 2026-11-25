@@ -14,13 +14,10 @@ from babamul.models import LsstAlert, ZtfAlert
 from blastwave.models import BOOMQuery, Source
 from blastwave.projections import lsst_aux_projection, ztf_aux_projection
 from blastwave.query.boom import BOOMClient
-from blastwave.query.parallel import run_parallel_funcs
 from blastwave.utils.photometry import (
     deduplicate_lsst_photometry,
     deduplicate_ztf_photometry,
 )
-
-crossmatch_catalogs = ["LSPSC", "NED", "PS1_DR2"]
 
 parse_map = {
     "ZTF_alerts": deduplicate_ztf_photometry,
@@ -141,23 +138,11 @@ class AlertClient(BOOMClient, ABC):
         :param trim: Whether to trim the data
         :return: Dictionary of the aux data for the given object ID
         """
-        latest, aux_data = run_parallel_funcs(
-            [
-                partial(
-                    self.get_latest_alert,
-                    object_id,
-                    catalog=catalog,
-                    projection=alert_projection,
-                ),
-                partial(
-                    self.get_aux_data,
-                    object_id,
-                    catalog=catalog,
-                    projection=aux_projection,
-                    trim=trim,
-                ),
-            ],
-            n_threads=self.n_threads,
+        latest = self.get_latest_alert(
+            object_id, catalog=catalog, projection=alert_projection
+        )
+        aux_data = self.get_aux_data(
+            object_id, catalog=catalog, projection=aux_projection, trim=trim
         )
         aux_data.update(latest)
         aux_data = self.update_crossmatches(aux_data)
@@ -182,47 +167,27 @@ class AlertClient(BOOMClient, ABC):
             aux_data["candidate"]["ra"], aux_data["candidate"]["dec"], unit="deg"
         )
 
-        all_matches = run_parallel_funcs(
-            [
-                partial(self.get_crossmatch, cat, src_position)
-                for cat in crossmatch_catalogs
-            ],
-            n_threads=self.n_threads,
-        )
-
-        for cat, matches in zip(crossmatch_catalogs, all_matches):
-            aux_data["cross_matches"][cat] = matches
-
-        return aux_data
-
-    def get_crossmatch(self, catalog: str, src_position: SkyCoord) -> list[dict]:
-        """
-        Cone search a crossmatch catalog for a source,
-        labelling each match with its separation from the source.
-
-        :param catalog: Catalog name
-        :param src_position: Position of the source
-        :return: List of matches in the catalog
-        """
-        matches = self.cone_search(
-            src_position.ra.deg, src_position.dec.deg, catalog=catalog, limit=1
-        )
-
-        # Should be zero or 1 for now
-        for match in matches:
-            pos = match.pop("coordinates")["radec_geojson"]
-            sep = float(
-                src_position.separation(
-                    SkyCoord(
-                        pos["coordinates"][0] + 180.0,
-                        pos["coordinates"][1],
-                        unit="deg",
-                    )
-                ).arcsec
+        for cat in ["LSPSC", "NED", "PS1_DR2"]:
+            matches = self.cone_search(
+                src_position.ra.deg, src_position.dec.deg, catalog=cat, limit=1
             )
-            match["distance_arcsec"] = sep
 
-        return matches
+            # Should be zero or 1 for now
+            for match in matches:
+                pos = match.pop("coordinates")["radec_geojson"]
+                sep = float(
+                    src_position.separation(
+                        SkyCoord(
+                            pos["coordinates"][0] + 180.0,
+                            pos["coordinates"][1],
+                            unit="deg",
+                        )
+                    ).arcsec
+                )
+                match["distance_arcsec"] = sep
+
+            aux_data["cross_matches"][cat] = matches
+        return aux_data
 
     def get_match_photometry(self, catalog: str, aliases: dict) -> pd.DataFrame:
         """
@@ -251,13 +216,9 @@ class AlertClient(BOOMClient, ABC):
         :param aliases: Aliases
         :return: DataFrame of photometry for all cross-matched surveys
         """
-        all_match_photometry = run_parallel_funcs(
-            [
-                partial(self.get_match_photometry, survey, aliases)
-                for survey in parse_map
-            ],
-            n_threads=self.n_threads,
-        )
+        all_match_photometry = []
+        for survey in parse_map:
+            all_match_photometry.append(self.get_match_photometry(survey, aliases))
         return pd.concat(all_match_photometry, ignore_index=True)
 
     def get_all_photometry(
@@ -312,32 +273,6 @@ class AlertClient(BOOMClient, ABC):
         )
         photometry_df = self.get_all_photometry(full_data, catalog=catalog)
         return generator_mapping[catalog](full_data, photometry_df)
-
-    def batch_get_full_data(
-        self,
-        object_ids: Iterable[str | int],
-        n_threads: int | None = None,
-        progress: bool = False,
-        skip_errors: bool = False,
-        **kwargs,
-    ) -> list[dict | None]:
-        """
-        Get full data for a set of objects, fetching them in parallel.
-
-        :param object_ids: Object IDs
-        :param n_threads: Number of threads to use (default: client n_threads)
-        :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip objects which fail with a
-            skippable error, returning None in their place, rather than raising
-        :param kwargs: Arguments for each object, passed to get_full_data, i.e
-            catalog, alert_projection, aux_projection and trim
-        :return: List of full data, one entry per object,
-            in the order of the object IDs
-        """
-        tasks = [
-            partial(self.get_full_data, object_id, **kwargs) for object_id in object_ids
-        ]
-        return self.run_batch(tasks, "Alerts", n_threads, progress, skip_errors)
 
     def batch_get_source(
         self,
