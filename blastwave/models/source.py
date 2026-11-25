@@ -438,7 +438,7 @@ class Source(BaseModel):
     #     res = self.model_dump()
     #     with open(output_path, "w") as f:
     #         json.dump(res, f, indent=4)
-
+    #
     def convert_to_ztfstyle(self) -> dict:
         """
         Convert Source object to ZTF-style dictionary,
