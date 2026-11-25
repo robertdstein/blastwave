@@ -67,6 +67,10 @@ entry per input, in the order of the inputs, and takes:
 * `skip_errors`, to log and skip any failed entry, returning `None` in its place
   instead of raising the error
 
+Any other argument goes to the single-query method behind it, so
+`batch_get_source(object_ids, catalog="LSST_alerts")` passes the catalog to each
+`get_source` call.
+
 Pick the thread count for a client when you create it, up to a limit of 32:
 
 ```python

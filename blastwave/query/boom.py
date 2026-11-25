@@ -249,7 +249,7 @@ class BOOMClient:
         res.raise_for_status()
         return res.json()["data"]
 
-    def run_batch(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+    def run_batch(
         self,
         tasks: Sequence[Callable[[], R]],
         desc: str,
@@ -481,45 +481,29 @@ class BOOMClient:
         )
         return res
 
-    def batch_cone_search(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+    def batch_cone_search(
         self,
         coordinates: Iterable[Sequence[float]],
-        radius_arcsec: float = 1.0,
-        catalog: str | None = None,
-        limit: int | None = 1,
-        filter_query: FilterQuery | dict | None = None,
-        projection: dict | None = None,
         n_threads: int | None = None,
         progress: bool = False,
         skip_errors: bool = False,
+        **kwargs,
     ) -> list[list[dict] | None]:
         """
         Do a set of cone searches, running them in parallel.
 
         :param coordinates: Positions to search, as (ra, dec) pairs in decimal degrees
-        :param radius_arcsec: Search radius (arcsec)
-        :param catalog: Catalog name
-        :param limit: Number of results to return per position
-        :param filter_query: Optional filter to use instead of constructing one
-        :param projection: Optional projection to use instead of constructing one
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
         :param skip_errors: Whether to log and skip failed searches, returning
             None in their place, rather than raising the error
+        :param kwargs: Arguments for each search, passed to cone_search, i.e
+            radius_arcsec, catalog, limit, filter_query and projection
         :return: List of search results, one entry per position,
             in the order of the positions
         """
         tasks = [
-            partial(
-                self.cone_search,
-                float(ra),
-                float(dec),
-                radius_arcsec=radius_arcsec,
-                catalog=catalog,
-                limit=limit,
-                filter_query=filter_query,
-                projection=projection,
-            )
+            partial(self.cone_search, float(ra), float(dec), **kwargs)
             for ra, dec in coordinates
         ]
         return self.run_batch(tasks, "Cone searches", n_threads, progress, skip_errors)

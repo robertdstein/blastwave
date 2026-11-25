@@ -3,11 +3,11 @@ Unit tests for the parallel/batch query methods of the clients, mocking out
 the network layer so these tests need no BOOM credentials or connectivity.
 """
 
-# pylint: disable=missing-function-docstring,protected-access
-# pylint: disable=unused-argument,too-few-public-methods
+# pylint: disable=missing-function-docstring,protected-access,unused-argument
 
 import threading
 import unittest
+from typing import Callable
 from unittest import mock
 
 from blastwave.models import Source
@@ -27,27 +27,26 @@ def fake_source(object_id, **kwargs) -> Source:
     )
 
 
-class MaxConcurrencyCounter:
+def concurrency_counter(hold: float = 0.02) -> tuple[Callable, dict]:
     """
-    Records the largest number of calls which were ever in flight at once
+    Make a stand-in call which holds briefly, alongside the tally it keeps of
+    the most calls which were ever in flight at once
     """
+    tally = {"in_flight": 0, "max_in_flight": 0}
+    lock = threading.Lock()
 
-    def __init__(self, hold: float = 0.02):
-        self.hold = hold
-        self.lock = threading.Lock()
-        self.in_flight = 0
-        self.max_in_flight = 0
-
-    def __call__(self, *args, **kwargs):
-        with self.lock:
-            self.in_flight += 1
-            self.max_in_flight = max(self.max_in_flight, self.in_flight)
+    def counter(*args, **kwargs):
+        with lock:
+            tally["in_flight"] += 1
+            tally["max_in_flight"] = max(tally["max_in_flight"], tally["in_flight"])
         try:
-            threading.Event().wait(self.hold)
+            threading.Event().wait(hold)
             return mock.Mock()
         finally:
-            with self.lock:
-                self.in_flight -= 1
+            with lock:
+                tally["in_flight"] -= 1
+
+    return counter, tally
 
 
 class TestValidateNThreads(unittest.TestCase):
@@ -125,12 +124,12 @@ class TestBatchQuery(unittest.TestCase):
 
     def test_queries_are_sent_concurrently(self):
         client = BOOMClient(n_threads=4)
-        counter = MaxConcurrencyCounter()
+        counter, tally = concurrency_counter()
 
         with mock.patch.object(client, "query", side_effect=counter):
             client.batch_query([{"catalog_name": "CatWISE2020"}] * 4)
 
-        self.assertGreater(counter.max_in_flight, 1)
+        self.assertGreater(tally["max_in_flight"], 1)
 
 
 class TestBatchCount(unittest.TestCase):
@@ -259,7 +258,7 @@ class TestRequestsInFlight(unittest.TestCase):
 
     def test_api_calls_are_capped_by_the_semaphore(self):
         client = BOOMClient()
-        counter = MaxConcurrencyCounter()
+        counter, tally = concurrency_counter()
         client._session = mock.Mock(post=counter)
         client._session_headers = {"Authorization": "Bearer TOKEN"}
         client._request_semaphore = threading.BoundedSemaphore(2)
@@ -273,7 +272,7 @@ class TestRequestsInFlight(unittest.TestCase):
         for thread in threads:
             thread.join()
 
-        self.assertEqual(counter.max_in_flight, 2)
+        self.assertEqual(tally["max_in_flight"], 2)
 
 
 class TestBatchGetFullData(unittest.TestCase):
@@ -344,12 +343,12 @@ class TestBatchGetSource(unittest.TestCase):
 
     def test_sources_are_fetched_concurrently(self):
         client = ZTFClient(n_threads=4)
-        counter = MaxConcurrencyCounter()
+        counter, tally = concurrency_counter()
 
         with mock.patch.object(client, "get_source", side_effect=counter):
             client.batch_get_source(["ZTF1", "ZTF2", "ZTF3", "ZTF4"])
 
-        self.assertGreater(counter.max_in_flight, 1)
+        self.assertGreater(tally["max_in_flight"], 1)
 
 
 if __name__ == "__main__":

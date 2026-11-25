@@ -313,77 +313,54 @@ class AlertClient(BOOMClient, ABC):
         photometry_df = self.get_all_photometry(full_data, catalog=catalog)
         return generator_mapping[catalog](full_data, photometry_df)
 
-    def batch_get_full_data(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+    def batch_get_full_data(
         self,
         object_ids: Iterable[str | int],
-        catalog: str | None = None,
-        alert_projection: dict | None = None,
-        aux_projection: dict | None = None,
-        trim: bool = False,
         n_threads: int | None = None,
         progress: bool = False,
         skip_errors: bool = False,
+        **kwargs,
     ) -> list[dict | None]:
         """
         Get full data for a set of objects, fetching them in parallel.
 
         :param object_ids: Object IDs
-        :param catalog: Parent catalog name (e.g. ZTF_alerts or LSST_alerts)
-        :param alert_projection: Projection for fields to return for alert
-        :param aux_projection: Projection for fields to return for aux data
-        :param trim: Whether to trim the data
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
         :param skip_errors: Whether to log and skip failed objects, returning
             None in their place, rather than raising the error
+        :param kwargs: Arguments for each object, passed to get_full_data, i.e
+            catalog, alert_projection, aux_projection and trim
         :return: List of full data, one entry per object,
             in the order of the object IDs
         """
         tasks = [
-            partial(
-                self.get_full_data,
-                object_id,
-                catalog=catalog,
-                alert_projection=alert_projection,
-                aux_projection=aux_projection,
-                trim=trim,
-            )
-            for object_id in object_ids
+            partial(self.get_full_data, object_id, **kwargs) for object_id in object_ids
         ]
         return self.run_batch(tasks, "Alerts", n_threads, progress, skip_errors)
 
-    def batch_get_source(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+    def batch_get_source(
         self,
         object_ids: Iterable[str | int],
-        catalog: str | None = None,
-        alert_projection: dict | None = None,
-        aux_projection: dict | None = None,
         n_threads: int | None = None,
         progress: bool = False,
         skip_errors: bool = False,
+        **kwargs,
     ) -> list[Source | None]:
         """
         Get the full source data for a set of objects, fetching them in parallel.
 
         :param object_ids: Object IDs
-        :param catalog: Catalog name
-        :param alert_projection: Projection for fields to return for alert
-        :param aux_projection: Projection for fields to return for aux data
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
         :param skip_errors: Whether to log and skip failed objects, returning
             None in their place, rather than raising the error
+        :param kwargs: Arguments for each object, passed to get_source, i.e
+            catalog, alert_projection and aux_projection
         :return: List of sources, one entry per object,
             in the order of the object IDs
         """
         tasks = [
-            partial(
-                self.get_source,
-                object_id,
-                catalog=catalog,
-                alert_projection=alert_projection,
-                aux_projection=aux_projection,
-            )
-            for object_id in object_ids
+            partial(self.get_source, object_id, **kwargs) for object_id in object_ids
         ]
         return self.run_batch(tasks, "Sources", n_threads, progress, skip_errors)
