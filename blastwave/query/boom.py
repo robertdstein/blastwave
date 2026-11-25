@@ -4,7 +4,9 @@ Client for querying BOOM
 
 import logging
 import os
-from typing import Callable, Mapping, Optional
+import threading
+from functools import partial
+from typing import Callable, Iterable, Mapping, Optional, Sequence, TypeVar
 from urllib.parse import urljoin
 
 import numpy as np
@@ -15,6 +17,11 @@ from urllib3.util import Retry
 
 from blastwave.errors import BOOMCredentialsError
 from blastwave.models.query import BOOMQuery, CatalogQuery, FilterQuery
+from blastwave.query.parallel import (
+    DEFAULT_N_THREADS,
+    run_parallel_funcs,
+    tolerate_errors,
+)
 from blastwave.query.timeout import DEFAULT_TIMEOUT, TimeoutHTTPAdapter
 
 logger = logging.getLogger(__name__)
@@ -22,22 +29,61 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.kaboom.caltech.edu"
 BOOM_POOL_MAXSIZE = 32
 
+R = TypeVar("R")
+
 
 class BOOMClient:
     """
     Basic BOOM client class for executing functions
 
     :param base_url: Base URL to query (default: https://api.kaboom.caltech.edu)
+    :param n_threads: Default number of threads to use for batch queries.
+        Use one to run batch queries serially.
     """
 
     def __init__(
         self,
         base_url: str = BASE_URL,
+        n_threads: int = DEFAULT_N_THREADS,
     ):
         self.base_url = base_url
+        self.n_threads = self.validate_n_threads(n_threads)
         self._session: None | requests.Session = None
         self._session_headers: None | dict = None
         self._catalogs: None | list[str] = None
+        # So that parallel queries do not each request their own token
+        self._lock = threading.RLock()
+        # Never more requests in flight than the connection pool can hold
+        self._request_semaphore = threading.BoundedSemaphore(BOOM_POOL_MAXSIZE)
+
+    @staticmethod
+    def validate_n_threads(n_threads: int) -> int:
+        """
+        Check that a thread count is sane, capping it at the connection pool size.
+
+        :param n_threads: Requested number of threads
+        :return: Number of threads to actually use
+        """
+        if n_threads < 1:
+            raise ValueError(f"n_threads must be at least one, got {n_threads}")
+        if n_threads > BOOM_POOL_MAXSIZE:
+            logger.warning(
+                f"n_threads of {n_threads} exceeds the connection pool size of "
+                f"{BOOM_POOL_MAXSIZE}, so using {BOOM_POOL_MAXSIZE} threads instead."
+            )
+            return BOOM_POOL_MAXSIZE
+        return n_threads
+
+    def _resolve_n_threads(self, n_threads: int | None = None) -> int:
+        """
+        Resolve a thread count, falling back to the client default.
+
+        :param n_threads: Requested number of threads
+        :return: Number of threads to actually use
+        """
+        if n_threads is None:
+            return self.n_threads
+        return self.validate_n_threads(n_threads)
 
     @property
     def catalog(self) -> str | None:
@@ -72,10 +118,12 @@ class BOOMClient:
         :return: Session headers
         """
         if self._session_headers is None:
-            self._session_headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._get_boom_token()}",
-            }
+            with self._lock:
+                if self._session_headers is None:
+                    self._session_headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self._get_boom_token()}",
+                    }
         assert self._session_headers is not None
         return self._session_headers
 
@@ -87,7 +135,9 @@ class BOOMClient:
         :return: Session
         """
         if self._session is None:
-            self._session = self.set_up_session()
+            with self._lock:
+                if self._session is None:
+                    self._session = self.set_up_session()
         assert self._session is not None
         return self._session
 
@@ -157,18 +207,19 @@ class BOOMClient:
 
         url = urljoin(self.base_url, endpoint)
 
-        if method == "get":
-            response = methods[method](
-                url,
-                params=data,
-                headers=headers,
-            )
-        else:
-            response = methods[method](
-                url,
-                json=data,
-                headers=headers,
-            )
+        with self._request_semaphore:
+            if method == "get":
+                response = methods[method](
+                    url,
+                    params=data,
+                    headers=headers,
+                )
+            else:
+                response = methods[method](
+                    url,
+                    json=data,
+                    headers=headers,
+                )
 
         return response
 
@@ -197,6 +248,75 @@ class BOOMClient:
         res = self.api("post", "queries/count", data=boom_query.model_dump())
         res.raise_for_status()
         return res.json()["data"]
+
+    def run_batch(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+        self,
+        tasks: Sequence[Callable[[], R]],
+        desc: str,
+        n_threads: int | None = None,
+        progress: bool = False,
+        skip_errors: bool = False,
+    ) -> list[R | None]:
+        """
+        Run a set of prepared client calls in parallel, using a pool of threads.
+
+        :param tasks: Calls to run, as zero-argument functions
+        :param desc: Label for the batch, used for the progress bar
+        :param n_threads: Number of threads to use (default: client n_threads)
+        :param progress: Whether to show a progress bar
+        :param skip_errors: Whether to log and skip failed tasks, returning
+            None in their place, rather than raising the error
+        :return: List of results, one entry per task, in the order of the tasks
+        """
+        funcs: list[Callable[[], R | None]] = (
+            [tolerate_errors(task) for task in tasks] if skip_errors else list(tasks)
+        )
+        return run_parallel_funcs(
+            funcs,
+            n_threads=self._resolve_n_threads(n_threads),
+            progress=progress,
+            desc=desc,
+        )
+
+    def batch_query(
+        self,
+        queries: Iterable[BOOMQuery | dict],
+        n_threads: int | None = None,
+        progress: bool = False,
+        skip_errors: bool = False,
+    ) -> list[list[dict] | None]:
+        """
+        Make find query calls for a set of queries, running them in parallel.
+
+        :param queries: Queries to execute
+        :param n_threads: Number of threads to use (default: client n_threads)
+        :param progress: Whether to show a progress bar
+        :param skip_errors: Whether to log and skip failed queries, returning
+            None in their place, rather than raising the error
+        :return: List of results, one entry per query, in the order of the queries
+        """
+        tasks = [partial(self.query, query) for query in queries]
+        return self.run_batch(tasks, "Queries", n_threads, progress, skip_errors)
+
+    def batch_count(
+        self,
+        queries: Iterable[CatalogQuery | FilterQuery | BOOMQuery | dict],
+        n_threads: int | None = None,
+        progress: bool = False,
+        skip_errors: bool = False,
+    ) -> list[int | None]:
+        """
+        Make count calls for a set of queries, running them in parallel.
+
+        :param queries: Queries to count
+        :param n_threads: Number of threads to use (default: client n_threads)
+        :param progress: Whether to show a progress bar
+        :param skip_errors: Whether to log and skip failed queries, returning
+            None in their place, rather than raising the error
+        :return: List of counts, one entry per query, in the order of the queries
+        """
+        tasks = [partial(self.count, query) for query in queries]
+        return self.run_batch(tasks, "Counts", n_threads, progress, skip_errors)
 
     def get_fresh_token(self, username: str, password: str) -> str:
         """
@@ -234,9 +354,11 @@ class BOOMClient:
         :return: List of catalogs
         """
         if self._catalogs is None:
-            res = self.api("get", "catalogs")
-            res.raise_for_status()
-            self._catalogs = [x["name"] for x in res.json()["data"]]
+            with self._lock:
+                if self._catalogs is None:
+                    res = self.api("get", "catalogs")
+                    res.raise_for_status()
+                    self._catalogs = [x["name"] for x in res.json()["data"]]
 
         assert self._catalogs is not None
         return self._catalogs
@@ -358,6 +480,49 @@ class BOOMClient:
             )
         )
         return res
+
+    def batch_cone_search(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+        self,
+        coordinates: Iterable[Sequence[float]],
+        radius_arcsec: float = 1.0,
+        catalog: str | None = None,
+        limit: int | None = 1,
+        filter_query: FilterQuery | dict | None = None,
+        projection: dict | None = None,
+        n_threads: int | None = None,
+        progress: bool = False,
+        skip_errors: bool = False,
+    ) -> list[list[dict] | None]:
+        """
+        Do a set of cone searches, running them in parallel.
+
+        :param coordinates: Positions to search, as (ra, dec) pairs in decimal degrees
+        :param radius_arcsec: Search radius (arcsec)
+        :param catalog: Catalog name
+        :param limit: Number of results to return per position
+        :param filter_query: Optional filter to use instead of constructing one
+        :param projection: Optional projection to use instead of constructing one
+        :param n_threads: Number of threads to use (default: client n_threads)
+        :param progress: Whether to show a progress bar
+        :param skip_errors: Whether to log and skip failed searches, returning
+            None in their place, rather than raising the error
+        :return: List of search results, one entry per position,
+            in the order of the positions
+        """
+        tasks = [
+            partial(
+                self.cone_search,
+                float(ra),
+                float(dec),
+                radius_arcsec=radius_arcsec,
+                catalog=catalog,
+                limit=limit,
+                filter_query=filter_query,
+                projection=projection,
+            )
+            for ra, dec in coordinates
+        ]
+        return self.run_batch(tasks, "Cone searches", n_threads, progress, skip_errors)
 
 
 @deprecated("Use BOOMClient instead")

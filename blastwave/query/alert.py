@@ -3,7 +3,8 @@ Base Class for an Alert Survey Client
 """
 
 from abc import ABC, abstractmethod
-from typing import Callable
+from functools import partial
+from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd
@@ -13,10 +14,13 @@ from babamul.models import LsstAlert, ZtfAlert
 from blastwave.models import BOOMQuery, Source
 from blastwave.projections import lsst_aux_projection, ztf_aux_projection
 from blastwave.query.boom import BOOMClient
+from blastwave.query.parallel import run_parallel_funcs
 from blastwave.utils.photometry import (
     deduplicate_lsst_photometry,
     deduplicate_ztf_photometry,
 )
+
+crossmatch_catalogs = ["LSPSC", "NED", "PS1_DR2"]
 
 parse_map = {
     "ZTF_alerts": deduplicate_ztf_photometry,
@@ -137,11 +141,23 @@ class AlertClient(BOOMClient, ABC):
         :param trim: Whether to trim the data
         :return: Dictionary of the aux data for the given object ID
         """
-        latest = self.get_latest_alert(
-            object_id, catalog=catalog, projection=alert_projection
-        )
-        aux_data = self.get_aux_data(
-            object_id, catalog=catalog, projection=aux_projection, trim=trim
+        latest, aux_data = run_parallel_funcs(
+            [
+                partial(
+                    self.get_latest_alert,
+                    object_id,
+                    catalog=catalog,
+                    projection=alert_projection,
+                ),
+                partial(
+                    self.get_aux_data,
+                    object_id,
+                    catalog=catalog,
+                    projection=aux_projection,
+                    trim=trim,
+                ),
+            ],
+            n_threads=self.n_threads,
         )
         aux_data.update(latest)
         aux_data = self.update_crossmatches(aux_data)
@@ -166,27 +182,47 @@ class AlertClient(BOOMClient, ABC):
             aux_data["candidate"]["ra"], aux_data["candidate"]["dec"], unit="deg"
         )
 
-        for cat in ["LSPSC", "NED", "PS1_DR2"]:
-            matches = self.cone_search(
-                src_position.ra.deg, src_position.dec.deg, catalog=cat, limit=1
-            )
+        all_matches = run_parallel_funcs(
+            [
+                partial(self.get_crossmatch, cat, src_position)
+                for cat in crossmatch_catalogs
+            ],
+            n_threads=self.n_threads,
+        )
 
-            # Should be zero or 1 for now
-            for match in matches:
-                pos = match.pop("coordinates")["radec_geojson"]
-                sep = float(
-                    src_position.separation(
-                        SkyCoord(
-                            pos["coordinates"][0] + 180.0,
-                            pos["coordinates"][1],
-                            unit="deg",
-                        )
-                    ).arcsec
-                )
-                match["distance_arcsec"] = sep
-
+        for cat, matches in zip(crossmatch_catalogs, all_matches):
             aux_data["cross_matches"][cat] = matches
+
         return aux_data
+
+    def get_crossmatch(self, catalog: str, src_position: SkyCoord) -> list[dict]:
+        """
+        Cone search a crossmatch catalog for a source,
+        labelling each match with its separation from the source.
+
+        :param catalog: Catalog name
+        :param src_position: Position of the source
+        :return: List of matches in the catalog
+        """
+        matches = self.cone_search(
+            src_position.ra.deg, src_position.dec.deg, catalog=catalog, limit=1
+        )
+
+        # Should be zero or 1 for now
+        for match in matches:
+            pos = match.pop("coordinates")["radec_geojson"]
+            sep = float(
+                src_position.separation(
+                    SkyCoord(
+                        pos["coordinates"][0] + 180.0,
+                        pos["coordinates"][1],
+                        unit="deg",
+                    )
+                ).arcsec
+            )
+            match["distance_arcsec"] = sep
+
+        return matches
 
     def get_match_photometry(self, catalog: str, aliases: dict) -> pd.DataFrame:
         """
@@ -215,9 +251,13 @@ class AlertClient(BOOMClient, ABC):
         :param aliases: Aliases
         :return: DataFrame of photometry for all cross-matched surveys
         """
-        all_match_photometry = []
-        for survey in parse_map:
-            all_match_photometry.append(self.get_match_photometry(survey, aliases))
+        all_match_photometry = run_parallel_funcs(
+            [
+                partial(self.get_match_photometry, survey, aliases)
+                for survey in parse_map
+            ],
+            n_threads=self.n_threads,
+        )
         return pd.concat(all_match_photometry, ignore_index=True)
 
     def get_all_photometry(
@@ -272,3 +312,78 @@ class AlertClient(BOOMClient, ABC):
         )
         photometry_df = self.get_all_photometry(full_data, catalog=catalog)
         return generator_mapping[catalog](full_data, photometry_df)
+
+    def batch_get_full_data(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+        self,
+        object_ids: Iterable[str | int],
+        catalog: str | None = None,
+        alert_projection: dict | None = None,
+        aux_projection: dict | None = None,
+        trim: bool = False,
+        n_threads: int | None = None,
+        progress: bool = False,
+        skip_errors: bool = False,
+    ) -> list[dict | None]:
+        """
+        Get full data for a set of objects, fetching them in parallel.
+
+        :param object_ids: Object IDs
+        :param catalog: Parent catalog name (e.g. ZTF_alerts or LSST_alerts)
+        :param alert_projection: Projection for fields to return for alert
+        :param aux_projection: Projection for fields to return for aux data
+        :param trim: Whether to trim the data
+        :param n_threads: Number of threads to use (default: client n_threads)
+        :param progress: Whether to show a progress bar
+        :param skip_errors: Whether to log and skip failed objects, returning
+            None in their place, rather than raising the error
+        :return: List of full data, one entry per object,
+            in the order of the object IDs
+        """
+        tasks = [
+            partial(
+                self.get_full_data,
+                object_id,
+                catalog=catalog,
+                alert_projection=alert_projection,
+                aux_projection=aux_projection,
+                trim=trim,
+            )
+            for object_id in object_ids
+        ]
+        return self.run_batch(tasks, "Alerts", n_threads, progress, skip_errors)
+
+    def batch_get_source(  # pylint: disable=too-many-arguments, too-many-positional-arguments
+        self,
+        object_ids: Iterable[str | int],
+        catalog: str | None = None,
+        alert_projection: dict | None = None,
+        aux_projection: dict | None = None,
+        n_threads: int | None = None,
+        progress: bool = False,
+        skip_errors: bool = False,
+    ) -> list[Source | None]:
+        """
+        Get the full source data for a set of objects, fetching them in parallel.
+
+        :param object_ids: Object IDs
+        :param catalog: Catalog name
+        :param alert_projection: Projection for fields to return for alert
+        :param aux_projection: Projection for fields to return for aux data
+        :param n_threads: Number of threads to use (default: client n_threads)
+        :param progress: Whether to show a progress bar
+        :param skip_errors: Whether to log and skip failed objects, returning
+            None in their place, rather than raising the error
+        :return: List of sources, one entry per object,
+            in the order of the object IDs
+        """
+        tasks = [
+            partial(
+                self.get_source,
+                object_id,
+                catalog=catalog,
+                alert_projection=alert_projection,
+                aux_projection=aux_projection,
+            )
+            for object_id in object_ids
+        ]
+        return self.run_batch(tasks, "Sources", n_threads, progress, skip_errors)

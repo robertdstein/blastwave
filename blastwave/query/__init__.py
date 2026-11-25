@@ -4,5 +4,11 @@ Module for querying BOOM
 
 from blastwave.query.boom import BOOM_POOL_MAXSIZE, BOOMClient
 from blastwave.query.lsst import LSSTClient
+from blastwave.query.parallel import (
+    DEFAULT_N_THREADS,
+    run_parallel,
+    run_parallel_funcs,
+    tolerate_errors,
+)
 from blastwave.query.timeout import TimeoutHTTPAdapter
 from blastwave.query.ztf import ZTFClient
