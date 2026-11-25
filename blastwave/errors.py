@@ -12,10 +12,8 @@ class BOOMCredentialsError(Exception):
     """
 
 
-# Errors which affect one query alone: the API or network failed for it, or the
-# data it asked for is missing or malformed. A batch can skip these and carry
-# on. Anything else, such as missing credentials or a bad argument, is a problem
-# with the batch as a whole, and is raised rather than repeated for every entry.
+# Errors which affect one query alone, so a batch can skip them and carry on.
+# Anything else is wrong with the whole batch, and raises rather than repeating.
 SKIPPABLE_ERRORS = (
     requests.RequestException,
     KeyError,
