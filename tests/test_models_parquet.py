@@ -7,6 +7,7 @@ Tests for pydantic_to_arrow_schema
 import unittest
 
 import pyarrow as pa
+from pydantic import BaseModel
 
 from blastwave.models import Observation, pydantic_to_arrow_schema
 from blastwave.models.source import Source
@@ -33,6 +34,16 @@ class TestPydanticToArrowSchema(unittest.TestCase):
         # Source.offset is `float | None`
         schema = pydantic_to_arrow_schema(Source)
         self.assertEqual(schema.field("offset").type, pa.float64())
+
+    def test_optional_unwraps_whichever_side_is_none(self):
+        # `None | float` puts None first in __args__, unlike `float | None`
+        class ReversedOptional(BaseModel):
+            """Model with None written before the type"""
+
+            value: None | float
+
+        schema = pydantic_to_arrow_schema(ReversedOptional)
+        self.assertEqual(schema.field("value").type, pa.float64())
 
     def test_excludes_computed_fields_by_default(self):
         schema = pydantic_to_arrow_schema(Source)

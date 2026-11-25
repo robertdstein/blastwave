@@ -2,10 +2,14 @@
 Script for converting Pydantic models to PyArrow schemas for Parquet serialization
 """
 
+from types import NoneType
+
 import pyarrow as pa
 from pydantic import BaseModel
 
-PYDANTIC_TO_ARROW = {
+# Keyed by annotation, which pydantic gives as a type expression rather than a
+# type, so it can also be a union or a generic alias like `float | None`
+PYDANTIC_TO_ARROW: dict[object, pa.DataType] = {
     float: pa.float64(),
     int: pa.int64(),
     str: pa.string(),
@@ -32,7 +36,7 @@ def pydantic_to_arrow_schema(
 
         args = getattr(annotation, "__args__", None)
         if args:
-            annotation = next(a for a in args if not isinstance(a, type(None)))
+            annotation = next((a for a in args if a is not NoneType), None)
 
         arrow_type = PYDANTIC_TO_ARROW.get(annotation, pa.string())
         fields.append(pa.field(name, arrow_type, nullable=True))
@@ -40,13 +44,6 @@ def pydantic_to_arrow_schema(
     if include_computed:
         for name, computed_field in model.model_computed_fields.items():
             annotation = computed_field.return_type
-
-            if annotation not in PYDANTIC_TO_ARROW:
-                continue
-
-            args = getattr(annotation, "__args__", None)
-            if args:
-                annotation = next(a for a in args if not isinstance(a, type(None)))
             # Skip derived lists etc
             if annotation not in PYDANTIC_TO_ARROW:
                 continue
