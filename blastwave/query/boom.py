@@ -82,15 +82,13 @@ class BOOMClient:
 
         :return: Session headers
         """
-        if self._session_headers is None:
-            with self._lock:
-                if self._session_headers is None:
-                    self._session_headers = {
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {self._get_boom_token()}",
-                    }
-        assert self._session_headers is not None
-        return self._session_headers
+        with self._lock:
+            if self._session_headers is None:
+                self._session_headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self._get_boom_token()}",
+                }
+            return self._session_headers
 
     def get_session(self) -> requests.Session:
         """
@@ -99,12 +97,10 @@ class BOOMClient:
 
         :return: Session
         """
-        if self._session is None:
-            with self._lock:
-                if self._session is None:
-                    self._session = self.set_up_session()
-        assert self._session is not None
-        return self._session
+        with self._lock:
+            if self._session is None:
+                self._session = self.set_up_session()
+            return self._session
 
     def _get_boom_token(self) -> str:
         """
@@ -312,15 +308,12 @@ class BOOMClient:
 
         :return: List of catalogs
         """
-        if self._catalogs is None:
-            with self._lock:
-                if self._catalogs is None:
-                    res = self.api("get", "catalogs")
-                    res.raise_for_status()
-                    self._catalogs = [x["name"] for x in res.json()["data"]]
-
-        assert self._catalogs is not None
-        return self._catalogs
+        with self._lock:
+            if self._catalogs is None:
+                res = self.api("get", "catalogs")
+                res.raise_for_status()
+                self._catalogs = [x["name"] for x in res.json()["data"]]
+            return self._catalogs
 
     def resolve_catalog(self, catalog: str | None = None) -> str:
         """
