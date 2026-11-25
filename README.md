@@ -64,8 +64,10 @@ entry per input, in the order of the inputs, and takes:
 
 * `n_threads`, the number of threads to use for this call
 * `progress`, to show a progress bar
-* `skip_errors`, to log and skip any failed entry, returning `None` in its place
-  instead of raising the error
+* `skip_errors`, to log and skip an entry whose query failed or whose data was
+  missing, returning `None` in its place instead of raising. Anything else, such
+  as missing credentials, still raises rather than being repeated for every
+  entry in the batch
 
 Any other argument goes to the single-query method behind it, so
 `batch_get_source(object_ids, catalog="LSST_alerts")` passes the catalog to each

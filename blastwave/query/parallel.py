@@ -31,22 +31,28 @@ def _call(func: Callable[[], R]) -> R:
     return func()
 
 
-def tolerate_errors(func: Callable[..., R]) -> Callable[..., R | None]:
+def tolerate_errors(
+    func: Callable[..., R],
+    errors: type[Exception] | tuple[type[Exception], ...],
+) -> Callable[..., R | None]:
     """
-    Wrap a function so that exceptions are logged rather than raised,
+    Wrap a function so that the given errors are logged rather than raised,
     with None returned in place of a result.
 
     This lets the remaining tasks in a batch finish even if one task fails.
+    Any error not listed is raised as usual, since it is a sign that the batch
+    as a whole is wrong, rather than one task in it.
 
     :param func: Function to wrap
-    :return: Wrapped function, returning None for any call which fails
+    :param errors: Error types to tolerate
+    :return: Wrapped function, returning None for any call raising those errors
     """
 
     @wraps(func)
     def wrapper(*args, **kwargs) -> R | None:
         try:
             return func(*args, **kwargs)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except errors as exc:
             logger.error(f"Task failed, skipping it: {exc}")
             return None
 

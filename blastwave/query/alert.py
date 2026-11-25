@@ -327,8 +327,8 @@ class AlertClient(BOOMClient, ABC):
         :param object_ids: Object IDs
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip failed objects, returning
-            None in their place, rather than raising the error
+        :param skip_errors: Whether to log and skip objects which fail with a
+            skippable error, returning None in their place, rather than raising
         :param kwargs: Arguments for each object, passed to get_full_data, i.e
             catalog, alert_projection, aux_projection and trim
         :return: List of full data, one entry per object,
@@ -353,8 +353,8 @@ class AlertClient(BOOMClient, ABC):
         :param object_ids: Object IDs
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip failed objects, returning
-            None in their place, rather than raising the error
+        :param skip_errors: Whether to log and skip objects which fail with a
+            skippable error, returning None in their place, rather than raising
         :param kwargs: Arguments for each object, passed to get_source, i.e
             catalog, alert_projection and aux_projection
         :return: List of sources, one entry per object,

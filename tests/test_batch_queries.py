@@ -10,6 +10,9 @@ import unittest
 from typing import Callable
 from unittest import mock
 
+import requests
+
+from blastwave.errors import BOOMCredentialsError
 from blastwave.models import Source
 from blastwave.query import LSSTClient, ZTFClient
 from blastwave.query.boom import BOOM_POOL_MAXSIZE, BOOMClient
@@ -106,7 +109,7 @@ class TestBatchQuery(unittest.TestCase):
 
         def fake_query(query):
             if query["catalog_name"] == "bad":
-                raise ValueError("bad query")
+                raise requests.HTTPError("500 Server Error")
             return [{"ok": True}]
 
         with mock.patch.object(client, "query", side_effect=fake_query):
@@ -121,6 +124,16 @@ class TestBatchQuery(unittest.TestCase):
                 )
 
         self.assertEqual(res, [[{"ok": True}], None, [{"ok": True}]])
+
+    def test_skip_errors_still_raises_a_batch_wide_error(self):
+        client = BOOMClient(n_threads=2)
+        with mock.patch.object(
+            client, "query", side_effect=BOOMCredentialsError("no token")
+        ):
+            with self.assertRaises(BOOMCredentialsError):
+                client.batch_query(
+                    [{"catalog_name": "a"}, {"catalog_name": "b"}], skip_errors=True
+                )
 
     def test_queries_are_sent_concurrently(self):
         client = BOOMClient(n_threads=4)
@@ -149,7 +162,7 @@ class TestBatchCount(unittest.TestCase):
 
     def test_skip_errors_returns_none_for_failures(self):
         client = BOOMClient(n_threads=2)
-        with mock.patch.object(client, "count", side_effect=ValueError("nope")):
+        with mock.patch.object(client, "count", side_effect=requests.Timeout("slow")):
             with self.assertLogs("blastwave.query.parallel", level="ERROR"):
                 res = client.batch_count([{"catalog_name": "a"}], skip_errors=True)
         self.assertEqual(res, [None])
@@ -182,7 +195,7 @@ class TestBatchConeSearch(unittest.TestCase):
 
         def fake_cone_search(ra, dec, **kwargs):
             if dec < 0:
-                raise ValueError("bad position")
+                raise requests.ConnectionError("no route")
             return [{"ra": ra, "dec": dec}]
 
         with mock.patch.object(client, "cone_search", side_effect=fake_cone_search):

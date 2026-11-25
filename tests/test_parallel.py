@@ -78,20 +78,35 @@ class TestTolerateErrors(unittest.TestCase):
     Tests for tolerate_errors
     """
 
-    def test_failed_tasks_become_none(self):
+    def test_tolerated_tasks_become_none(self):
+        func = tolerate_errors(lambda x: 1 / x, ZeroDivisionError)
         with self.assertLogs("blastwave.query.parallel", level="ERROR"):
-            res = run_parallel(tolerate_errors(lambda x: 1 / x), [1, 0, 4], n_threads=3)
+            res = run_parallel(func, [1, 0, 4], n_threads=3)
         self.assertEqual(res, [1.0, None, 0.25])
 
+    def test_other_errors_are_still_raised(self):
+        func = tolerate_errors(lambda x: 1 / x, KeyError)
+        with self.assertRaises(ZeroDivisionError):
+            run_parallel(func, [1, 0], n_threads=2)
+
+    def test_several_error_types_can_be_tolerated(self):
+        def fail(x):
+            raise [KeyError, IndexError][x]("no luck")
+
+        func = tolerate_errors(fail, (KeyError, IndexError))
+        with self.assertLogs("blastwave.query.parallel", level="ERROR"):
+            res = run_parallel(func, [0, 1], n_threads=2)
+        self.assertEqual(res, [None, None])
+
     def test_successful_task_is_unchanged(self):
-        self.assertEqual(tolerate_errors(lambda x: x * 2)(3), 6)
+        self.assertEqual(tolerate_errors(lambda x: x * 2, KeyError)(3), 6)
 
     def test_works_for_zero_argument_functions(self):
         def fail():
-            raise RuntimeError("no luck")
+            raise IndexError("no luck")
 
         with self.assertLogs("blastwave.query.parallel", level="ERROR"):
-            res = run_parallel_funcs([tolerate_errors(fail), lambda: 1])
+            res = run_parallel_funcs([tolerate_errors(fail, IndexError), lambda: 1])
         self.assertEqual(res, [None, 1])
 
 

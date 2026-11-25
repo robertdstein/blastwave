@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from typing_extensions import deprecated
 from urllib3.util import Retry
 
-from blastwave.errors import BOOMCredentialsError
+from blastwave.errors import SKIPPABLE_ERRORS, BOOMCredentialsError
 from blastwave.models.query import BOOMQuery, CatalogQuery, FilterQuery
 from blastwave.query.parallel import (
     DEFAULT_N_THREADS,
@@ -264,12 +264,14 @@ class BOOMClient:
         :param desc: Label for the batch, used for the progress bar
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip failed tasks, returning
-            None in their place, rather than raising the error
+        :param skip_errors: Whether to log and skip tasks which fail with one of
+            SKIPPABLE_ERRORS, returning None in their place, rather than raising
         :return: List of results, one entry per task, in the order of the tasks
         """
         funcs: list[Callable[[], R | None]] = (
-            [tolerate_errors(task) for task in tasks] if skip_errors else list(tasks)
+            [tolerate_errors(task, SKIPPABLE_ERRORS) for task in tasks]
+            if skip_errors
+            else list(tasks)
         )
         return run_parallel_funcs(
             funcs,
@@ -291,8 +293,8 @@ class BOOMClient:
         :param queries: Queries to execute
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip failed queries, returning
-            None in their place, rather than raising the error
+        :param skip_errors: Whether to log and skip queries which fail with a
+            skippable error, returning None in their place, rather than raising
         :return: List of results, one entry per query, in the order of the queries
         """
         tasks = [partial(self.query, query) for query in queries]
@@ -311,8 +313,8 @@ class BOOMClient:
         :param queries: Queries to count
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip failed queries, returning
-            None in their place, rather than raising the error
+        :param skip_errors: Whether to log and skip queries which fail with a
+            skippable error, returning None in their place, rather than raising
         :return: List of counts, one entry per query, in the order of the queries
         """
         tasks = [partial(self.count, query) for query in queries]
@@ -495,8 +497,8 @@ class BOOMClient:
         :param coordinates: Positions to search, as (ra, dec) pairs in decimal degrees
         :param n_threads: Number of threads to use (default: client n_threads)
         :param progress: Whether to show a progress bar
-        :param skip_errors: Whether to log and skip failed searches, returning
-            None in their place, rather than raising the error
+        :param skip_errors: Whether to log and skip searches which fail with a
+            skippable error, returning None in their place, rather than raising
         :param kwargs: Arguments for each search, passed to cone_search, i.e
             radius_arcsec, catalog, limit, filter_query and projection
         :return: List of search results, one entry per position,
