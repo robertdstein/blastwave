@@ -45,3 +45,54 @@ export BLASTWAVE_DATA_DIR="/path/to/cache/dir"
 # Usage
 
 See example Jupyter notebooks for usage examples.
+
+# Parallel queries
+
+Queries spend nearly all of their time waiting on the API, so use a batch method
+to send a set of them at once from a pool of threads:
+
+```python
+from blastwave import ZTFClient
+
+client = ZTFClient()
+sources = client.batch_get_source(object_ids, progress=True)
+```
+
+The batch methods are `batch_query`, `batch_cone_search` and `batch_get_source`.
+Each one returns a list with one entry per input, in the order of the inputs,
+and takes:
+
+* `n_threads`, the number of threads to use for this call
+* `progress`, to show a progress bar
+* `skip_errors`, to log and skip an entry whose query failed or whose data was
+  missing, returning `None` in its place instead of raising. Anything else, such
+  as missing credentials, still raises rather than being repeated for every
+  entry in the batch
+
+Any other argument goes to the single-query method behind it, so
+`batch_get_source(object_ids, catalog="LSST_alerts")` passes the catalog to each
+`get_source` call.
+
+Pick the thread count for a client when you create it. More than 32 threads is
+no faster, since that is how many connections the session keeps open:
+
+```python
+client = ZTFClient(n_threads=16)
+```
+
+A single thread sends the queries one at a time:
+
+```python
+client = ZTFClient(n_threads=1)
+```
+
+Any other client method can be run the same way, by handing `run_parallel` one
+call per entry:
+
+```python
+from functools import partial
+
+from blastwave import run_parallel
+
+counts = run_parallel([partial(client.count, query) for query in queries])
+```

@@ -37,7 +37,8 @@ dependencies = [
     "polars",
     "matplotlib",
     "pandas",
-    "pyarrow"
+    "pyarrow",
+    "tqdm"
 ]
 [project.optional-dependencies]
 dev = [
@@ -49,7 +50,6 @@ dev = [
     "autotyping",
     "mypy",
     "jupyter",
-    "tqdm",
     "astropy",
 ]
 

@@ -3,7 +3,8 @@ Base Class for an Alert Survey Client
 """
 
 from abc import ABC, abstractmethod
-from typing import Callable
+from functools import partial
+from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd
@@ -272,3 +273,29 @@ class AlertClient(BOOMClient, ABC):
         )
         photometry_df = self.get_all_photometry(full_data, catalog=catalog)
         return generator_mapping[catalog](full_data, photometry_df)
+
+    def batch_get_source(
+        self,
+        object_ids: Iterable[str | int],
+        n_threads: int | None = None,
+        progress: bool = False,
+        skip_errors: bool = False,
+        **kwargs,
+    ) -> list[Source | None]:
+        """
+        Get the full source data for a set of objects, fetching them in parallel.
+
+        :param object_ids: Object IDs
+        :param n_threads: Number of threads to use (default: client n_threads)
+        :param progress: Whether to show a progress bar
+        :param skip_errors: Whether to log and skip objects which fail with a
+            skippable error, returning None in their place, rather than raising
+        :param kwargs: Arguments for each object, passed to get_source, i.e
+            catalog, alert_projection and aux_projection
+        :return: List of sources, one entry per object,
+            in the order of the object IDs
+        """
+        tasks = [
+            partial(self.get_source, object_id, **kwargs) for object_id in object_ids
+        ]
+        return self.run_batch(tasks, "Sources", n_threads, progress, skip_errors)
