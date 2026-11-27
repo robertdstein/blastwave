@@ -29,7 +29,7 @@ class TestRunParallel(unittest.TestCase):
         self.assertEqual(res, [0, 2, 4, 6, 8])
 
     def test_funcs_run_concurrently(self):
-        # The barrier only releases if all four funcs are in flight at once
+        # The barrier only releases if all four are in flight at once
         barrier = threading.Barrier(4, timeout=10)
         res = run_parallel([lambda: barrier.wait() >= 0] * 4, n_threads=4)
         self.assertEqual(res, [True] * 4)

@@ -7,8 +7,7 @@ from types import NoneType
 import pyarrow as pa
 from pydantic import BaseModel
 
-# Keyed by annotation, which pydantic gives as a type expression rather than a
-# type, so it can also be a union or a generic alias like `float | None`
+# Keyed by annotation, which can be a union or generic alias, not just a type
 PYDANTIC_TO_ARROW: dict[object, pa.DataType] = {
     float: pa.float64(),
     int: pa.int64(),

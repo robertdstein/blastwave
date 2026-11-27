@@ -53,7 +53,7 @@ class TestBatchQuery(unittest.TestCase):
         query.assert_not_called()
 
     def test_queries_are_sent_concurrently(self):
-        # The barrier only releases if all four queries are in flight at once
+        # The barrier only releases if all four are in flight at once
         client = BOOMClient(n_threads=4)
         barrier = threading.Barrier(4, timeout=10)
 
@@ -230,7 +230,7 @@ class TestBatchGetSource(unittest.TestCase):
         self.assertIsNone(sources[1])
 
     def test_sources_are_fetched_concurrently(self):
-        # The barrier only releases if all four fetches are in flight at once
+        # The barrier only releases if all four are in flight at once
         client = ZTFClient(n_threads=4)
         barrier = threading.Barrier(4, timeout=10)
 

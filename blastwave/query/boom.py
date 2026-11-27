@@ -47,7 +47,7 @@ class BOOMClient:
         self._session: None | requests.Session = None
         self._session_headers: None | dict = None
         self._catalogs: None | list[str] = None
-        # So that parallel queries do not each request their own token
+        # So parallel queries do not each request their own token
         self._lock = threading.RLock()
 
     @property
